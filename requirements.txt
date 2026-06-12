@@ -1,0 +1,2 @@
+uvicorn
+git+https://github.com/shashanktu/vida.git
