@@ -1,0 +1,44 @@
+import requests
+from agent_framework import tool
+from typing import Annotated
+from pydantic import Field
+from vida.utils.prompt_manager_v2 import AgentDescriptionPrompt, ToolFieldsPrompt
+from vida.utils.github_client import get_github_client
+from vida.utils.request_context import github_pat_ctx
+from failure_config import yaml_agent_url, terraform_agent_url, github_agent_url
+import json
+
+
+_git_agent_field = ToolFieldsPrompt("git-agent-field-description")
+@tool(name="Github_Agent", description=str(AgentDescriptionPrompt("github-agent-description")), approval_mode="never_require")
+def github_agent_tool_call(prompt: Annotated[str, Field(description = _git_agent_field.get("prompt"))]) -> str:
+    pat_token = github_pat_ctx.get(None)
+    url = github_agent_url
+    if url:
+        response = requests.post(url, json={"prompt": prompt, "pat_token": pat_token})
+        json_response = json.loads(response.text)
+        final_response = json_response["output"]
+        return final_response
+    return "No URL configured for Github agent."
+
+_yaml_agent_field = ToolFieldsPrompt("yaml-agent-field-description")
+@tool(name="Yaml_Agent", description=str(AgentDescriptionPrompt("yaml-agent-description")), approval_mode="never_require")
+def yaml_agent_tool_call(prompt: Annotated[str, Field(description = _yaml_agent_field.get("prompt"))]) -> str:
+    url = yaml_agent_url
+    if url:
+        response = requests.post(url, json={"prompt": prompt})
+        json_response = json.loads(response.text)
+        final_response = json_response["output"]
+        return final_response
+    return "No URL configured for Yaml agent."
+
+_terraform_agent_field = ToolFieldsPrompt("tf-agent-field-description")
+@tool(name="Terraform_Agent", description=str(AgentDescriptionPrompt("tf-agent-description")), approval_mode="never_require")
+def terraform_agent_tool_call(prompt: Annotated[str, Field(description = _terraform_agent_field.get("prompt"))]) -> str:
+    url = terraform_agent_url
+    if url:
+        response = requests.post(url, json={"prompt": prompt})
+        json_response = json.loads(response.text)
+        final_response = json_response["output"]
+        return final_response
+    return "No URL configured for Terraform agent."
