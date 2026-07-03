@@ -7,11 +7,14 @@ from vida.utils.github_client import get_github_client
 from vida.utils.request_context import github_pat_ctx
 from failure_config import yaml_agent_url, terraform_agent_url, github_agent_url
 import json
+from vida.utils.logger import get_logger
+logger = get_logger(__name__)
 
 
 _git_agent_field = ToolFieldsPrompt("git-agent-field-description")
 @tool(name="Github_Agent", description=str(AgentDescriptionPrompt("github-agent-description")), approval_mode="never_require")
 def github_agent_tool_call(prompt: Annotated[str, Field(description = _git_agent_field.get("prompt"))]) -> str:
+    logger.info("[Github_Agent] called by [Failure Agent]")
     pat_token = github_pat_ctx.get(None)
     url = github_agent_url
     if url:
@@ -24,6 +27,7 @@ def github_agent_tool_call(prompt: Annotated[str, Field(description = _git_agent
 _yaml_agent_field = ToolFieldsPrompt("yaml-agent-field-description")
 @tool(name="Yaml_Agent", description=str(AgentDescriptionPrompt("yaml-agent-description")), approval_mode="never_require")
 def yaml_agent_tool_call(prompt: Annotated[str, Field(description = _yaml_agent_field.get("prompt"))]) -> str:
+    logger.info("[Yaml_Agent] called by [Failure Agent]")
     url = yaml_agent_url
     if url:
         response = requests.post(url, json={"prompt": prompt})
@@ -35,6 +39,7 @@ def yaml_agent_tool_call(prompt: Annotated[str, Field(description = _yaml_agent_
 _terraform_agent_field = ToolFieldsPrompt("tf-agent-field-description")
 @tool(name="Terraform_Agent", description=str(AgentDescriptionPrompt("tf-agent-description")), approval_mode="never_require")
 def terraform_agent_tool_call(prompt: Annotated[str, Field(description = _terraform_agent_field.get("prompt"))]) -> str:
+    logger.info("[Terraform_Agent] called by [Failure Agent]")
     url = terraform_agent_url
     if url:
         response = requests.post(url, json={"prompt": prompt})
