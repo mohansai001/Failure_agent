@@ -12,6 +12,7 @@ def ProbableSolutionsAnalyzer(prompt:Annotated[str,Field(description=_prob_solut
     This tool analyzes the given prompt and provides probable solutions based on the context.
     """
     # Generate a response using the Azure LLM
+    print("******************\nProbable Solutions Analyzer activated......\n********************")
     knowledge_base = ""
     capabilities = "Github Agent : \n" + str(AgentDescriptionPrompt("github-agent-description")) + "\n\n" + "YAML Agent : \n" + str(AgentDescriptionPrompt("yaml-agent-description")) + "\n\n" + "Terraform Agent : \n" + str(AgentDescriptionPrompt("tf-agent-description"))
     wrapper_prompt = GeneratorPrompt("probable-solutions-generator-prompt")
@@ -19,4 +20,5 @@ def ProbableSolutionsAnalyzer(prompt:Annotated[str,Field(description=_prob_solut
     response = get_azure_response(final_prompt)
     
     # Return the generated response
+    print(f"Response from Probable Solutions Analyzer:\n ************************ {response}")
     return response

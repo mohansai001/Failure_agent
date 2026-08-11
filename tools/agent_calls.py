@@ -4,7 +4,7 @@ from typing import Annotated
 from pydantic import Field
 from vida.utils.prompt_manager_v2 import AgentDescriptionPrompt, ToolFieldsPrompt
 from vida.utils.github_client import get_github_client
-from vida.utils.request_context import github_pat_ctx
+from vida.utils.request_context import github_pat_ctx, task_id_ctx
 from failure_config import yaml_agent_url, terraform_agent_url, github_agent_url
 import json
 from vida.utils.logger import get_logger
@@ -16,9 +16,10 @@ _git_agent_field = ToolFieldsPrompt("git-agent-field-description")
 def github_agent_tool_call(prompt: Annotated[str, Field(description = _git_agent_field.get("prompt"))]) -> str:
     logger.info("[Github_Agent] called by [Failure Agent]")
     pat_token = github_pat_ctx.get(None)
+    task_id = task_id_ctx.get(None)
     url = github_agent_url
     if url:
-        response = requests.post(url, json={"prompt": prompt, "pat_token": pat_token})
+        response = requests.post(url, json={"prompt": prompt, "pat_token": pat_token, "task_id": task_id})
         json_response = json.loads(response.text)
         final_response = json_response["output"]
         return final_response
@@ -28,9 +29,10 @@ _yaml_agent_field = ToolFieldsPrompt("yaml-agent-field-description")
 @tool(name="Yaml_Agent", description=str(AgentDescriptionPrompt("yaml-agent-description")), approval_mode="never_require")
 def yaml_agent_tool_call(prompt: Annotated[str, Field(description = _yaml_agent_field.get("prompt"))]) -> str:
     logger.info("[Yaml_Agent] called by [Failure Agent]")
+    task_id = task_id_ctx.get(None)
     url = yaml_agent_url
     if url:
-        response = requests.post(url, json={"prompt": prompt})
+        response = requests.post(url, json={"prompt": prompt, "task_id": task_id})
         json_response = json.loads(response.text)
         final_response = json_response["output"]
         return final_response
@@ -40,9 +42,10 @@ _terraform_agent_field = ToolFieldsPrompt("tf-agent-field-description")
 @tool(name="Terraform_Agent", description=str(AgentDescriptionPrompt("tf-agent-description")), approval_mode="never_require")
 def terraform_agent_tool_call(prompt: Annotated[str, Field(description = _terraform_agent_field.get("prompt"))]) -> str:
     logger.info("[Terraform_Agent] called by [Failure Agent]")
+    task_id = task_id_ctx.get(None)
     url = terraform_agent_url
     if url:
-        response = requests.post(url, json={"prompt": prompt})
+        response = requests.post(url, json={"prompt": prompt, "task_id": task_id})
         json_response = json.loads(response.text)
         final_response = json_response["output"]
         return final_response
