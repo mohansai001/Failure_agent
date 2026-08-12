@@ -11,4 +11,4 @@ class Failure_Agent(Base_Agent):
     model = fail_config.model
     AI_endpoint = fail_config.AI_endpoint
     instructions = str(AgentInstructionPrompt("failure-agent-instructions"))
-    tools = [ yaml_agent_tool_call, terraform_agent_tool_call,ProbableSolutionsAnalyzer]
+    tools = [ github_agent_tool_call, yaml_agent_tool_call, terraform_agent_tool_call,ProbableSolutionsAnalyzer]
