@@ -5,7 +5,7 @@ from pydantic import Field
 from vida.utils.prompt_manager_v2 import AgentDescriptionPrompt, ToolFieldsPrompt
 from vida.utils.github_client import get_github_client
 from vida.utils.request_context import github_pat_ctx, task_id_ctx
-from failure_config import yaml_agent_url, terraform_agent_url, github_agent_url
+from failure_config import yaml_agent_url, terraform_agent_url, github_agent_url, ado_agent_url
 import json
 from vida.utils.logger import get_logger
 logger = get_logger(__name__)
@@ -50,3 +50,15 @@ def terraform_agent_tool_call(prompt: Annotated[str, Field(description = _terraf
         final_response = json_response["output"]
         return final_response
     return "No URL configured for Terraform agent."
+
+@tool(name="ADO_Agent", description="Delegates Azure DevOps tasks to the ADO Agent. Use this agent to manage ADO projects, repositories, branches, commits, pull requests, pipelines, work items, and variable groups. Call this when any task involves Azure DevOps operations.", approval_mode="never_require")
+def ado_agent_tool_call(prompt: Annotated[str, Field(description="Full instructions for the ADO Agent describing the Azure DevOps task to perform. Include all relevant details such as project name, repository name, branch, pipeline name, or any other context needed to complete the task.")]) -> str:
+    logger.info("[ADO_Agent] called by [Failure Agent]")
+    task_id = task_id_ctx.get(None)
+    url = ado_agent_url
+    if url:
+        response = requests.post(url, json={"prompt": prompt, "task_id": task_id})
+        json_response = json.loads(response.text)
+        final_response = json_response["output"]
+        return final_response
+    return "No URL configured for ADO agent."
