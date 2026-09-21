@@ -1,8 +1,7 @@
 import os
-import re
 import requests
 from contextlib import contextmanager
-from fastapi import APIRouter, BackgroundTasks, HTTPException
+from fastapi import APIRouter, BackgroundTasks, Request
 from pydantic import BaseModel
 from typing import Any
 from datetime import datetime, timezone
@@ -14,12 +13,24 @@ from vida.models.requests.Agent_Task_requests import AgentTaskDetailsCreateReque
 from vida.database.database import sessionlocal
 from vida.utils.crud_ops import AgentTaskOps as ato
 from vida.utils.logger import get_logger
+from vida.utils.llm import get_azure_response
 
 logger = get_logger(__name__)
 router = APIRouter()
 
 
-# ── ADO REST helpers ──────────────────────────────────────────────────────────
+# ── DB context ────────────────────────────────────────────────────────────────
+
+@contextmanager
+def get_db():
+    db = sessionlocal()
+    try:
+        yield db
+    finally:
+        db.close()
+
+
+# ── ADO helpers ───────────────────────────────────────────────────────────────
 
 def _ado_headers() -> dict:
     import base64
@@ -33,8 +44,7 @@ def _fetch_build_timeline(org_url: str, project: str, build_id: int) -> list[dic
     try:
         resp = requests.get(url, headers=_ado_headers(), timeout=15)
         resp.raise_for_status()
-        data = resp.json()
-        return data.get("records", [])
+        return resp.json().get("records", [])
     except Exception as e:
         logger.warning(f"[webhook] Failed to fetch timeline for build {build_id}: {e}")
         return []
@@ -51,52 +61,75 @@ def _fetch_log_content(log_url: str) -> str:
 
 
 def _fetch_failed_logs(org_url: str, project: str, build_id: int, records: list[dict]) -> str:
-    """Fetch log content for failed/errored timeline records."""
     failed_records = [
         r for r in records
         if r.get("result") in ("failed", "canceled") and r.get("log")
     ]
     if not failed_records:
-        # fallback: fetch all task-level logs
         failed_records = [r for r in records if r.get("log") and r.get("type") == "Task"]
-
     log_parts = []
-    for record in failed_records[:5]:  # cap at 5 to avoid huge prompts
-        log_info = record.get("log", {})
-        log_url = log_info.get("url")
+    for record in failed_records[:5]:
+        log_url = record.get("log", {}).get("url")
         if not log_url:
             continue
         content = _fetch_log_content(log_url)
-        # trim to last 100 lines to keep prompt size reasonable
         lines = content.strip().splitlines()
         trimmed = "\n".join(lines[-100:]) if len(lines) > 100 else content
-        log_parts.append(
-            f"### Task: {record.get('name', 'Unknown')} (result={record.get('result')})\n{trimmed}"
-        )
-
+        log_parts.append(f"### Task: {record.get('name', 'Unknown')} (result={record.get('result')})\n{trimmed}")
     return "\n\n".join(log_parts)
 
 
-# ── Prompt builder ────────────────────────────────────────────────────────────
+# ── GitHub helpers ────────────────────────────────────────────────────────────
 
-def _build_prompt(payload: dict, records: list[dict], failed_logs: str) -> str:
+def _github_headers() -> dict:
+    token = os.getenv("GITHUB_PAT", "")
+    return {"Authorization": f"Bearer {token}", "Accept": "application/vnd.github+json"}
+
+
+def _fetch_github_failed_jobs(repo: str, run_id: int) -> tuple[list[dict], str]:
+    """Fetch failed jobs and their log snippets for a GitHub Actions run."""
+    jobs_url = f"https://api.github.com/repos/{repo}/actions/runs/{run_id}/jobs"
+    try:
+        resp = requests.get(jobs_url, headers=_github_headers(), timeout=15)
+        resp.raise_for_status()
+        jobs = resp.json().get("jobs", [])
+    except Exception as e:
+        logger.warning(f"[webhook] Failed to fetch GitHub jobs for run {run_id}: {e}")
+        return [], ""
+
+    failed_jobs = [j for j in jobs if j.get("conclusion") == "failure"]
+    log_parts = []
+    for job in failed_jobs[:5]:
+        job_id = job.get("id")
+        log_url = f"https://api.github.com/repos/{repo}/actions/jobs/{job_id}/logs"
+        try:
+            log_resp = requests.get(log_url, headers=_github_headers(), timeout=15, allow_redirects=True)
+            lines = log_resp.text.strip().splitlines()
+            trimmed = "\n".join(lines[-100:]) if len(lines) > 100 else log_resp.text
+            log_parts.append(f"### Job: {job.get('name')} (conclusion=failure)\n{trimmed}")
+        except Exception as e:
+            logger.warning(f"[webhook] Failed to fetch log for job {job_id}: {e}")
+
+    return failed_jobs, "\n\n".join(log_parts)
+
+
+# ── Prompt builders ───────────────────────────────────────────────────────────
+
+def _build_ado_prompt(payload: dict, records: list[dict], failed_logs: str) -> str:
     resource = payload.get("resource", {})
     definition = resource.get("definition", {})
     project = resource.get("project", {})
     repo = resource.get("repository", {})
     detailed_msg = payload.get("detailedMessage", {}).get("text", "")
-
     failed_steps = [
         f"  - {r['name']} (type={r.get('type')}, result={r.get('result')})"
         for r in records if r.get("result") in ("failed", "canceled")
     ]
-    failed_steps_text = "\n".join(failed_steps) if failed_steps else "  (none identified)"
-
     branch = resource.get("sourceBranch", "").replace("refs/heads/", "")
-
-    return f"""An Azure DevOps build has failed. Analyze the failure and take corrective action.
+    return f"""An Azure DevOps pipeline has failed. Analyze the failure and take corrective action.
 
 ## Build Details
+- Source       : Azure DevOps
 - Project      : {project.get('name')}
 - Pipeline     : {definition.get('name')} (ID: {definition.get('id')})
 - Build Number : {resource.get('buildNumber')}
@@ -108,14 +141,14 @@ def _build_prompt(payload: dict, records: list[dict], failed_logs: str) -> str:
 - Finish Time  : {resource.get('finishTime')}
 - Build URL    : {resource.get('_links', {}).get('web', {}).get('href')}
 
-## ADO Failure Summary
+## Failure Summary
 {detailed_msg.strip()}
 
-## Failed Pipeline Steps
-{failed_steps_text}
+## Failed Steps
+{chr(10).join(failed_steps) if failed_steps else '  (none identified)'}
 
 ## Failed Step Logs
-{failed_logs if failed_logs else "(logs unavailable)"}
+{failed_logs if failed_logs else '(logs unavailable)'}
 
 ## Instructions
 1. Identify the root cause from the logs and failed steps above.
@@ -125,68 +158,79 @@ def _build_prompt(payload: dict, records: list[dict], failed_logs: str) -> str:
 """
 
 
-# ── DB context ────────────────────────────────────────────────────────────────
+def _build_github_prompt(payload: dict, failed_jobs: list[dict], failed_logs: str) -> str:
+    run = payload.get("workflow_run", {})
+    repo = payload.get("repository", {}).get("full_name", "unknown")
+    failed_job_names = [
+        f"  - {j.get('name')} (steps failed: {sum(1 for s in j.get('steps', []) if s.get('conclusion') == 'failure')})"
+        for j in failed_jobs
+    ]
+    return f"""A GitHub Actions workflow has failed. Analyze the failure and take corrective action.
 
-@contextmanager
-def get_db():
-    db = sessionlocal()
-    try:
-        yield db
-    finally:
-        db.close()
+## Workflow Details
+- Source      : GitHub Actions
+- Repository  : {repo}
+- Workflow    : {run.get('name')}
+- Run ID      : {run.get('id')}
+- Branch      : {run.get('head_branch')}
+- Commit SHA  : {run.get('head_sha')}
+- Triggered by: {run.get('triggering_actor', {}).get('login', 'unknown')}
+- Run URL     : {run.get('html_url')}
+- Conclusion  : {run.get('conclusion')}
+
+## Failed Jobs
+{chr(10).join(failed_job_names) if failed_job_names else '  (none identified)'}
+
+## Failed Job Logs
+{failed_logs if failed_logs else '(logs unavailable)'}
+
+## Instructions
+1. Identify the root cause from the logs and failed jobs above.
+2. Determine which sub-agent (ADO, YAML, GitHub, Terraform) should handle the fix.
+3. Delegate to the appropriate agent and apply the fix.
+4. Report what was found and what action was taken.
+"""
 
 
-# ── Background task ───────────────────────────────────────────────────────────
+# ── Shared background task ────────────────────────────────────────────────────
 
-async def _process_webhook(payload: dict):
-    resource = payload.get("resource", {})
-    project_name = resource.get("project", {}).get("name", "unknown")
-    build_id = resource.get("id")
-    org_url = os.getenv("ADO_ORG_URL", "https://dev.azure.com/VAMDOJOPractice")
+async def _run_failure_agent(prompt: str, task_name: str):
+    final_prompt = str(get_azure_response(
+        text=f"remove the redundant data and give only the relevant error information for the failure agent to solve: {prompt}"
+    ))
 
-    logger.info(f"[webhook] Processing build.complete for build {build_id}, project='{project_name}'")
-
-    # Gather context from ADO
-    records = _fetch_build_timeline(org_url, project_name, build_id)
-    failed_logs = _fetch_failed_logs(org_url, project_name, build_id, records)
-    prompt = _build_prompt(payload, records, failed_logs)
-
-    # Create task record
     with get_db() as db:
         task_id = ato().add_task(db=db, task=AgentTaskDetailsCreateRequest(
             agent_id=2,
             task_status="pending",
-            task_prompt=prompt[:200],
-            task_name=f"webhook-build-{build_id}",
+            task_prompt=prompt,
+            task_name=task_name,
             start_time=datetime.now(timezone.utc),
         ))
 
     if not task_id:
-        logger.error(f"[webhook] Failed to create task for build {build_id}")
+        logger.error(f"[webhook] Failed to create task: {task_name}")
         return
 
     task_id_ref = task_id_ctx.set(task_id)
     try:
         agent = Failure_Agent.get_instance()
-        response = await agent.run(prompt=prompt, task_id=task_id)
-
+        response, _ = await agent.run(prompt=final_prompt, task_id=task_id)
         if response:
             _, _ = try_parse_json(response.text)
             with get_db() as db:
                 ato().update_task(db=db, task_id=task_id, task=AgentTaskDetailsUpdateRequest(
                     task_status="success", end_time=datetime.now(timezone.utc)
                 ))
-            logger.info(f"[webhook] Build {build_id} processed successfully. task_id={task_id}")
+            logger.info(f"[webhook] Task '{task_name}' processed successfully. task_id={task_id}")
         else:
             with get_db() as db:
                 ato().update_task(db=db, task_id=task_id, task=AgentTaskDetailsUpdateRequest(
                     task_status="failed", end_time=datetime.now(timezone.utc),
                     issue="No response from failure agent"
                 ))
-            logger.warning(f"[webhook] No response from failure agent for build {build_id}")
-
     except Exception as e:
-        logger.error(f"[webhook] Error processing build {build_id}: {e}", exc_info=True)
+        logger.error(f"[webhook] Error processing task '{task_name}': {e}", exc_info=True)
         with get_db() as db:
             ato().update_task(db=db, task_id=task_id, task=AgentTaskDetailsUpdateRequest(
                 task_status="failed", end_time=datetime.now(timezone.utc), issue=str(e)
@@ -195,27 +239,55 @@ async def _process_webhook(payload: dict):
         task_id_ctx.reset(task_id_ref)
 
 
-# ── Endpoint ──────────────────────────────────────────────────────────────────
+async def _process_ado_webhook(payload: dict):
+    resource = payload.get("resource", {})
+    project_name = resource.get("project", {}).get("name", "unknown")
+    build_id = resource.get("id")
+    org_url = os.getenv("ADO_ORG_URL", "https://dev.azure.com/VAMDOJOPractice")
+    logger.info(f"[webhook/ado] Processing build {build_id}, project='{project_name}'")
+    records = _fetch_build_timeline(org_url, project_name, build_id)
+    failed_logs = _fetch_failed_logs(org_url, project_name, build_id, records)
+    prompt = _build_ado_prompt(payload, records, failed_logs)
+    await _run_failure_agent(prompt, task_name=f"webhook-ado-{build_id}")
 
-class ADOWebhookPayload(BaseModel):
-    model_config = {"extra": "allow"}
 
-    eventType: str
-    resource: Any = None
+async def _process_github_webhook(payload: dict):
+    run = payload.get("workflow_run", {})
+    repo = payload.get("repository", {}).get("full_name", "unknown")
+    run_id = run.get("id")
+    logger.info(f"[webhook/github] Processing run {run_id}, repo='{repo}'")
+    failed_jobs, failed_logs = _fetch_github_failed_jobs(repo, run_id)
+    prompt = _build_github_prompt(payload, failed_jobs, failed_logs)
+    await _run_failure_agent(prompt, task_name=f"webhook-github-{run_id}")
 
 
-@router.post("/ado/webhook")
-async def ado_webhook(payload: ADOWebhookPayload, background_tasks: BackgroundTasks):
-    if payload.eventType != "build.complete":
-        logger.info(f"[webhook] Ignoring event type: {payload.eventType}")
-        return {"status": "ignored", "reason": f"eventType '{payload.eventType}' not handled"}
+# ── Unified endpoint ──────────────────────────────────────────────────────────
 
-    resource = payload.resource or {}
-    if isinstance(resource, dict) and resource.get("result") != "failed":
-        result = resource.get("result", "unknown")
-        logger.info(f"[webhook] Build result='{result}', skipping non-failed build")
-        return {"status": "ignored", "reason": f"build result is '{result}', only 'failed' builds are processed"}
+@router.post("/webhook")
+async def unified_webhook(request: Request, background_tasks: BackgroundTasks):
+    payload = await request.json()
+    headers = request.headers
+    github_event = headers.get("X-GitHub-Event")
 
-    background_tasks.add_task(_process_webhook, payload.model_dump())
-    logger.info(f"[webhook] Accepted build.complete webhook, queued for processing")
-    return {"status": "accepted", "message": "Webhook received, failure agent triggered in background"}
+    # ── GitHub Actions workflow_run failure ───────────────────────────────
+    if github_event == "workflow_run":
+        conclusion = payload.get("workflow_run", {}).get("conclusion")
+        if conclusion != "failure":
+            return {"status": "ignored", "reason": f"workflow_run conclusion='{conclusion}', only 'failure' handled"}
+        # background_tasks.add_task(_process_github_webhook, payload) # Note: update to queue
+        logger.info(f"[webhook] Accepted GitHub workflow_run failure")
+        return {"status": "accepted", "source": "github"}
+
+    # ── ADO build.complete failure ────────────────────────────────────────
+    if "eventType" in payload and "resource" in payload:
+        if payload.get("eventType") != "build.complete":
+            return {"status": "ignored", "reason": f"ADO eventType '{payload.get('eventType')}' not handled"}
+        resource = payload.get("resource", {})
+        if resource.get("result") != "failed":
+            return {"status": "ignored", "reason": f"ADO build result='{resource.get('result')}', only 'failed' handled"}
+        # background_tasks.add_task(_process_ado_webhook, payload) # Note: update to queue
+        logger.info(f"[webhook] Accepted ADO build.complete failure")
+        return {"status": "accepted", "source": "ado"}
+
+    logger.warning("[webhook] Unknown payload source")
+    return {"status": "ignored", "reason": "Could not determine webhook source"}
