@@ -274,7 +274,7 @@ async def unified_webhook(request: Request, background_tasks: BackgroundTasks):
         conclusion = payload.get("workflow_run", {}).get("conclusion")
         if conclusion != "failure":
             return {"status": "ignored", "reason": f"workflow_run conclusion='{conclusion}', only 'failure' handled"}
-        # background_tasks.add_task(_process_github_webhook, payload) # Note: update to queue
+        background_tasks.add_task(_process_github_webhook, payload) # Note: update to queue
         logger.info(f"[webhook] Accepted GitHub workflow_run failure")
         return {"status": "accepted", "source": "github"}
 
@@ -285,7 +285,7 @@ async def unified_webhook(request: Request, background_tasks: BackgroundTasks):
         resource = payload.get("resource", {})
         if resource.get("result") != "failed":
             return {"status": "ignored", "reason": f"ADO build result='{resource.get('result')}', only 'failed' handled"}
-        # background_tasks.add_task(_process_ado_webhook, payload) # Note: update to queue
+        background_tasks.add_task(_process_ado_webhook, payload) # Note: update to queue
         logger.info(f"[webhook] Accepted ADO build.complete failure")
         return {"status": "accepted", "source": "ado"}
 
