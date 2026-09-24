@@ -97,7 +97,8 @@ def _fetch_github_failed_jobs(repo: str, run_id: int) -> tuple[list[dict], str]:
         logger.warning(f"[webhook] Failed to fetch GitHub jobs for run {run_id}: {e}")
         return [], ""
 
-    failed_jobs = [j for j in jobs if j.get("conclusion") == "failure"]
+    FAILING_CONCLUSIONS = {"failure", "timed_out", "cancelled", "action_required", "startup_failure"}
+    failed_jobs = [j for j in jobs if j.get("conclusion") in FAILING_CONCLUSIONS]
     log_parts = []
     for job in failed_jobs[:5]:
         job_id = job.get("id")
@@ -126,6 +127,11 @@ def _build_ado_prompt(payload: dict, records: list[dict], failed_logs: str) -> s
         for r in records if r.get("result") in ("failed", "canceled")
     ]
     branch = resource.get("sourceBranch", "").replace("refs/heads/", "")
+    summarized_logs=""
+    if failed_logs:
+        summarized_logs = str(get_azure_response(
+            text=f"remove the redundant data and give only the relevant error information: {failed_logs}"
+        ))
     return f"""An Azure DevOps pipeline has failed. Analyze the failure and take corrective action.
 
 ## Build Details
@@ -148,7 +154,7 @@ def _build_ado_prompt(payload: dict, records: list[dict], failed_logs: str) -> s
 {chr(10).join(failed_steps) if failed_steps else '  (none identified)'}
 
 ## Failed Step Logs
-{failed_logs if failed_logs else '(logs unavailable)'}
+{summarized_logs if failed_logs else '(logs unavailable)'}
 
 ## Instructions
 1. Identify the root cause from the logs and failed steps above.
@@ -165,6 +171,11 @@ def _build_github_prompt(payload: dict, failed_jobs: list[dict], failed_logs: st
         f"  - {j.get('name')} (steps failed: {sum(1 for s in j.get('steps', []) if s.get('conclusion') == 'failure')})"
         for j in failed_jobs
     ]
+    summarized_logs=""
+    if failed_logs:
+        summarized_logs = str(get_azure_response(
+            text=f"remove the redundant data and give only the relevant error information: {failed_logs}"
+        ))
     return f"""A GitHub Actions workflow has failed. Analyze the failure and take corrective action.
 
 ## Workflow Details
@@ -182,7 +193,7 @@ def _build_github_prompt(payload: dict, failed_jobs: list[dict], failed_logs: st
 {chr(10).join(failed_job_names) if failed_job_names else '  (none identified)'}
 
 ## Failed Job Logs
-{failed_logs if failed_logs else '(logs unavailable)'}
+{summarized_logs if failed_logs else '(logs unavailable)'}
 
 ## Instructions
 1. Identify the root cause from the logs and failed jobs above.
@@ -195,9 +206,7 @@ def _build_github_prompt(payload: dict, failed_jobs: list[dict], failed_logs: st
 # ── Shared background task ────────────────────────────────────────────────────
 
 async def _run_failure_agent(prompt: str, task_name: str):
-    final_prompt = str(get_azure_response(
-        text=f"remove the redundant data and give only the relevant error information for the failure agent to solve: {prompt}"
-    ))
+    final_prompt = prompt
 
     with get_db() as db:
         task_id = ato().add_task(db=db, task=AgentTaskDetailsCreateRequest(
