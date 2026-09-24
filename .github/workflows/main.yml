@@ -12,6 +12,9 @@ env:
 
 jobs:
 
+  # ============================================================
+  # BUILD
+  # ============================================================
   build:
     name: Build Python App
     runs-on: ubuntu-latest
@@ -25,13 +28,65 @@ jobs:
         with:
           python-version: ${{ env.PYTHON_VERSION }}
 
+      # ----------------------------------------------------------
+      # Install dependencies directly into the deployment package.
+      #
+      # Azure App Setting:
+      # SCM_DO_BUILD_DURING_DEPLOYMENT=false
+      #
+      # Therefore dependencies are installed during CI rather
+      # than being rebuilt by Azure during deployment/startup.
+      # ----------------------------------------------------------
       - name: Install Dependencies
         run: |
           python -m pip install --upgrade pip
-          pip install -r requirements.txt
 
+          pip install \
+            --target=".python_packages/lib/site-packages" \
+            -r requirements.txt
+
+      # ----------------------------------------------------------
+      # Check dependency package size
+      # ----------------------------------------------------------
+      - name: Check Dependency Size
+        run: |
+          echo "========================================"
+          echo "Python dependency package size"
+          echo "========================================"
+
+          du -sh .python_packages
+
+          echo ""
+          echo "Largest installed packages:"
+          du -sh .python_packages/lib/site-packages/* 2>/dev/null \
+            | sort -hr \
+            | head -30
+
+      # ----------------------------------------------------------
+      # Check whether Oryx-generated files already exist
+      # ----------------------------------------------------------
+      - name: Check for Oryx Files
+        run: |
+          echo "========================================"
+          echo "Checking workspace for Oryx files"
+          echo "========================================"
+
+          find . -maxdepth 3 \
+            \( \
+              -name "oryx-manifest.toml" -o \
+              -name "oryx-manifest.json" -o \
+              -name "output.tar.zst" -o \
+              -name "antenv" \
+            \) \
+            -print || true
+
+      # ----------------------------------------------------------
+      # Create deployment package
+      # ----------------------------------------------------------
       - name: Create Deployment Package
         run: |
+          rm -f app.zip
+
           zip -r app.zip . \
             -x ".git/*" \
             -x ".github/*" \
@@ -39,13 +94,57 @@ jobs:
             -x "*.pyc" \
             -x "venv/*" \
             -x ".venv/*" \
-            -x "antenv/*"
+            -x "antenv/*" \
+            -x ".pytest_cache/*" \
+            -x ".mypy_cache/*" \
+            -x ".ruff_cache/*" \
+            -x "oryx-manifest.toml" \
+            -x "oryx-manifest.json" \
+            -x "output.tar.zst"
 
+      # ----------------------------------------------------------
+      # Verify deployment package
+      # ----------------------------------------------------------
       - name: Verify Deployment Package
         run: |
-          echo "Deployment package contents:"
+          echo "========================================"
+          echo "Deployment package"
+          echo "========================================"
+
+          ls -lh app.zip
+
+          echo ""
+          echo "Package size:"
+          du -h app.zip
+
+          echo ""
+          echo "First 100 files:"
           unzip -l app.zip | head -100
 
+          echo ""
+          echo "========================================"
+          echo "Checking Python dependencies"
+          echo "========================================"
+
+          unzip -l app.zip \
+            | grep ".python_packages/lib/site-packages" \
+            | head -10 || true
+
+          echo ""
+          echo "========================================"
+          echo "Checking for Oryx-generated files"
+          echo "========================================"
+
+          if unzip -l app.zip \
+            | grep -E "oryx-manifest|output\.tar\.zst|antenv"; then
+            echo "WARNING: Oryx-related files found in deployment package."
+          else
+            echo "OK: No Oryx-generated files found in deployment package."
+          fi
+
+      # ----------------------------------------------------------
+      # Upload deployment artifact
+      # ----------------------------------------------------------
       - name: Upload Build Artifact
         uses: actions/upload-artifact@v4
         with:
@@ -53,6 +152,9 @@ jobs:
           path: app.zip
 
 
+  # ============================================================
+  # SAST
+  # ============================================================
   sast:
     name: Security Scan (SAST)
     runs-on: ubuntu-latest
@@ -87,6 +189,9 @@ jobs:
           exit-code: 1
 
 
+  # ============================================================
+  # DEPLOY
+  # ============================================================
   deploy:
     name: Deploy to Azure Web App
     runs-on: ubuntu-latest
@@ -99,6 +204,31 @@ jobs:
         with:
           name: python-app
 
+      # ----------------------------------------------------------
+      # Verify downloaded artifact
+      # ----------------------------------------------------------
+      - name: Verify Downloaded Artifact
+        run: |
+          echo "========================================"
+          echo "Downloaded artifact"
+          echo "========================================"
+
+          ls -lh
+
+          echo ""
+          echo "app.zip:"
+          ls -lh app.zip
+
+          echo ""
+          echo "Checking package for Oryx files:"
+
+          unzip -l app.zip \
+            | grep -E "oryx-manifest|output\.tar\.zst|antenv" \
+            || echo "OK: No Oryx-generated files found."
+
+      # ----------------------------------------------------------
+      # Deploy
+      # ----------------------------------------------------------
       - name: Deploy to Azure Web App
         uses: azure/webapps-deploy@v3
         with:
