@@ -2,10 +2,8 @@ name: Failure-Agent CI-CD Pipeline
 
 on:
  # push:
-    branches:
-      - version1
   workflow_dispatch:
-
+    
 env:
   PYTHON_VERSION: "3.13"
   AZURE_WEBAPP_NAME: "Failureagent"
