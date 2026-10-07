@@ -3,7 +3,7 @@ name: Failure-Agent CI-CD Pipeline
 on:
   push:
     branches:
-      - main
+      - version1
   workflow_dispatch:
 
 env:
