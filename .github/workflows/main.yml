@@ -1,7 +1,6 @@
 name: Failure-Agent CI-CD Pipeline
 
 on:
- # push:
   workflow_dispatch:
     
 env:
