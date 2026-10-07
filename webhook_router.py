@@ -238,7 +238,7 @@ async def _run_failure_agent(prompt: str, task_name: str):
     task_id_ref = task_id_ctx.set(task_id)
     try:
         agent = Failure_Agent.get_instance()
-        response = await agent.run(prompt=final_prompt, task_id=task_id)
+        response, _ = await agent.run(prompt=final_prompt, task_id=task_id)
         if response:
             _, _ = try_parse_json(response.text)
             with get_db() as db:
