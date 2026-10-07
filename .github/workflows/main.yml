@@ -1,8 +1,12 @@
 name: Failure-Agent CI-CD Pipeline
 
 on:
+  push:
+    branches:
+      - version1
+
   workflow_dispatch:
-    
+
 env:
   PYTHON_VERSION: "3.13"
   AZURE_WEBAPP_NAME: "Failureagent"
@@ -49,7 +53,6 @@ jobs:
           name: python-app
           path: app.zip
 
-
   sast:
     name: Security Scan (SAST)
     runs-on: ubuntu-latest
@@ -82,7 +85,6 @@ jobs:
           format: table
           severity: HIGH,CRITICAL
           exit-code: 1
-
 
   deploy:
     name: Deploy to Azure Web App
