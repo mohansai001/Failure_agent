@@ -19,7 +19,14 @@ def github_agent_tool_call(prompt: Annotated[str, Field(description = _git_agent
     task_id = task_id_ctx.get(None)
     url = github_agent_url
     if url:
-        response = requests.post(url, json={"prompt": prompt, "pat_token": pat_token, "task_id": task_id})
+        response = requests.post(
+            url, 
+            json={
+                "prompt": prompt,
+                "pat_token": pat_token, 
+                "task_id": task_id,
+            },
+        )
         json_response = json.loads(response.text)
         final_response = json_response["output"]
         return final_response

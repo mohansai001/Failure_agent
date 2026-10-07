@@ -35,3 +35,7 @@ Thumbs.db
 # Build outputs
 frontend/dist/
 frontend/build/
+env1/ 
+.env 
+.env 
+env1/ 
