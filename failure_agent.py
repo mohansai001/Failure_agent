@@ -49,7 +49,6 @@ class Failure_Agent(Base_Agent):
         yaml_agent_tool_call,
         terraform_agent_tool_call,
         ado_agent_tool_call,
-        ProbableSolutionsAnalyzer,
         azure_devops_windows_self_hosted_runner_manager,
         ado_rerun_failed_build,
     ]
