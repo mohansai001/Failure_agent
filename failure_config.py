@@ -14,8 +14,8 @@ azure_secrets_url = Azure_Secrets_URL
 
 # Azure VM target used by Azure Run Command
 AZURE_SUBSCRIPTION_ID = os.getenv("AZURE_SUBSCRIPTION_ID")
-AZURE_VM_RESOURCE_GROUP = os.getenv("AZURE_VM_RESOURCE_GROUP")
-AZURE_VM_NAME = os.getenv("AZURE_VM_NAME")
+AZURE_VM_RESOURCE_GROUP = "chatpdf"
+AZURE_VM_NAME = "chatpdf123"
 
 azure_subscription_id = AZURE_SUBSCRIPTION_ID
 azure_vm_resource_group = AZURE_VM_RESOURCE_GROUP
