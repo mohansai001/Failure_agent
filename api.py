@@ -76,6 +76,10 @@ async def read_failure(request: failure_agent_request):
         agent = Failure_Agent.get_instance()
         response = await agent.run(prompt=request.prompt, task_id=task_id)
         print(response)
+        print("Response type:", type(response))
+        print("Response:", repr(response))
+        print("First element type:", type(response[0]))
+        print("AgentResponse attributes:", vars(response[0]))
         if response:
             output, is_json = try_parse_json(response[0])
             with get_db() as db:
