@@ -80,6 +80,9 @@ async def read_failure(request: failure_agent_request):
         print("Response:", repr(response))
         print("First element type:", type(response[0]))
         print("AgentResponse attributes:", vars(response[0]))
+        print("\n "+"="*30)
+        print("\n First message:", response[0].messages)
+        print("AgentMessage attributes:", vars(response[0].messages))
         if response:
             output, is_json = try_parse_json(response[0])
             with get_db() as db:
