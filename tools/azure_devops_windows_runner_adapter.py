@@ -180,6 +180,10 @@ _REQUIRED_INSTALL_ARGS: dict[str, tuple[str, ...]] = {
         "Include_pip=1",
         "Include_tcltk=1",
     ),
+    "node": (
+        "INSTALLDIR=C:\\Users\\Agent_Installations",
+        "ADDLOCAL=ALL",
+    ),
 }
 
 # Code-owned smoke tests: the LLM never writes these commands.
@@ -356,6 +360,7 @@ _LLM_RULES = (
     "For verify_command, use '<fixed-destination-executable> <version flag>'. If the executable path contains spaces, use the PowerShell call operator '&' with the quoted path; otherwise the call operator is optional.",
     "install_command must execute ONLY matched_file using Start-Process.",
     f"install_command MUST explicitly target exactly '{_INSTALL_DESTINATION}' using the installer's native destination/target argument.",
+    "If matched_file ends with .msi, install_command MUST use -FilePath 'msiexec.exe' and pass the full installer path as the first -ArgumentList value preceded by '/i'. Example: -FilePath 'msiexec.exe' -ArgumentList '/i','<full_path_to_msi>','/qn','/norestart','INSTALLDIR=...' -Wait -PassThru.",
     "Install silently and machine-wide where supported.",
     "Every -ArgumentList value must be a quoted string.",
     "Do not rely on installer defaults for core runtime components.",
