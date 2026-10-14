@@ -1,16 +1,10 @@
 from __future__ import annotations
 
-import json
-import logging
-
 from agent_framework import tool
 from pydantic import Field
 from typing import Annotated
 
 from tools.azure_devops_windows_runner_adapter import AzureDevOpsWindowsSelfHostedRunnerAdapter
-
-logger = logging.getLogger(__name__)
-logger.setLevel(logging.INFO)
 
 
 class RunnerManager:
@@ -25,18 +19,11 @@ class RunnerManager:
         technology: str,
         required_version: str,
     ) -> dict:
-        logger.info("event=runner_manager.remediation.started runner=%s technology=%s required_version=%s", runner_name, technology, required_version)
-        try:
-            result = self.adapter.resolve_version_compatibility(
-                runner_name=runner_name,
-                technology=technology,
-                required_version=required_version,
-            )
-            logger.info("event=runner_manager.remediation.completed success=%s message=%s", result.get("success"), str(result.get("message", ""))[:500])
-            return result
-        except Exception:
-            logger.exception("event=runner_manager.remediation.failed runner=%s technology=%s", runner_name, technology)
-            raise
+        return self.adapter.resolve_version_compatibility(
+            runner_name=runner_name,
+            technology=technology,
+            required_version=required_version,
+        )
 
 
 @tool(
@@ -57,13 +44,11 @@ def azure_devops_windows_self_hosted_runner_manager(
     technology: Annotated[str, Field(description="Dependency/runtime/tool technology, for example Python, .NET SDK, Node.js, npm, NuGet, Java, or Terraform.")],
     required_version: Annotated[str, Field(description="Required compatible version identified from the failure analysis.")],
 ) -> str:
-    logger.info("event=runner_manager.tool_invoked runner=%s technology=%s required_version=%s", runner_name, technology, required_version)
     manager = RunnerManager()
     result = manager.resolve_version_compatibility(
         runner_name=runner_name,
         technology=technology,
         required_version=required_version,
     )
-    output = json.dumps(result, indent=2)
-    logger.info("event=runner_manager.tool_returned success=%s output_chars=%d", result.get("success"), len(output))
-    return output
+    import json
+    return json.dumps(result, indent=2)
