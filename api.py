@@ -76,6 +76,11 @@ async def read_failure(request: failure_agent_request):
         agent = Failure_Agent.get_instance()
         response = await agent.run(prompt=request.prompt, task_id=task_id)
         if response:
+            print("\n" + "=" * 80)
+            print("FAILURE AGENT FINAL RESPONSE")
+            print("=" * 80)
+            print(response.text)
+            print("=" * 80 + "\n")
             output, is_json = try_parse_json(response.text)
             with get_db() as db:
                 ato().update_task(
