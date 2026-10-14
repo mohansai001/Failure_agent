@@ -29,7 +29,6 @@ Security policy:
 from __future__ import annotations
 
 import json
-import logging
 import re
 import threading
 import time
@@ -47,9 +46,6 @@ from failure_config import (
     runner_package_root,
 )
 from vida.utils.llm import get_azure_response
-
-logger = logging.getLogger(__name__)
-logger.setLevel(logging.INFO)
 
 
 class UnsafeRunnerCommand(ValueError):
@@ -399,10 +395,6 @@ class AzureDevOpsWindowsSelfHostedRunnerAdapter:
         self.vm_name = AZURE_VM_NAME
         self.package_root = str(runner_package_root).strip().rstrip("\\/")
         self._client: ComputeManagementClient | None = None
-        logger.info(
-            "event=runner_adapter.initialized vm=%s resource_group=%s package_root=%s install_destination=%s",
-            self.vm_name, self.resource_group, self.package_root, _INSTALL_DESTINATION,
-        )
 
     # -------------------------------------------------------------------------
     # Helpers: redaction and paths
@@ -753,8 +745,7 @@ class AzureDevOpsWindowsSelfHostedRunnerAdapter:
         with self._run_command_lock:
             for delay in (*self._RETRY_DELAYS, None):
                 try:
-                    logger.info("event=azure_vm_run_command.started vm=%s resource_group=%s", self.vm_name, self.resource_group)
-                    operation_result = client.virtual_machines.begin_run_command(
+                    return client.virtual_machines.begin_run_command(
                         resource_group_name=self.resource_group,
                         vm_name=self.vm_name,
                         parameters={
@@ -762,20 +753,16 @@ class AzureDevOpsWindowsSelfHostedRunnerAdapter:
                             "script": [script],
                         },
                     ).result()
-                    logger.info("event=azure_vm_run_command.completed vm=%s", self.vm_name)
-                    return operation_result
                 except HttpResponseError as exc:
                     busy = getattr(exc, "status_code", None) == 409 or "in progress" in str(exc).lower()
                     if not busy or delay is None:
-                        logger.exception("event=azure_vm_run_command.failed vm=%s status_code=%s", self.vm_name, getattr(exc, "status_code", None))
                         raise
-                    logger.warning("event=azure_vm_run_command.busy_retry vm=%s retry_delay_seconds=%s", self.vm_name, delay)
+                    print(f"Azure VM Run Command is busy. Retrying in {delay}s...")
                     time.sleep(delay)
         raise RuntimeError("Unexpected Run Command retry state.")  # pragma: no cover
 
     def _execute_fixed_script(self, script: str, phase: str) -> dict[str, Any]:
         """Run adapter-owned PowerShell and parse the real exit code."""
-        logger.info("event=runner.phase.started phase=%s vm=%s", phase, self.vm_name)
         wrapper = _WRAPPER.replace("@@PHASE@@", phase).replace("@@SCRIPT@@", script)
         result = self._submit_run_command(wrapper)
 
@@ -794,18 +781,12 @@ class AzureDevOpsWindowsSelfHostedRunnerAdapter:
             stdout = self._redact(stdout)
             stderr = self._redact(stderr)
 
-        success = exit_code == 0
-        # Redact even raw diagnostic output before putting any preview in application logs.
-        logger.info(
-            "event=runner.phase.completed phase=%s success=%s exit_code=%s stdout_preview=%s stderr_preview=%s",
-            phase, success, exit_code, self._redact(stdout)[:500], self._redact(stderr)[:300],
-        )
         return {
             "phase": phase,
             "status_code": exit_code,
             "stdout": stdout,
             "stderr": stderr,
-            "success": success,
+            "success": exit_code == 0,
         }
 
     def _run_validated_command(self, command: str, phase: str) -> dict[str, Any]:
@@ -819,20 +800,16 @@ class AzureDevOpsWindowsSelfHostedRunnerAdapter:
     # -------------------------------------------------------------------------
 
     def _list_package_files(self) -> list[str]:
-        logger.info("event=package_discovery.started package_root=%s", self.package_root)
         script = _DISCOVERY_SCRIPT.replace("@@ROOT@@", self.package_root.replace("'", "''"))
         result = self._execute_fixed_script(script, "package_discovery")
         if not result["success"]:
-            logger.warning("event=package_discovery.failed exit_code=%s", result.get("status_code"))
             return []
         names = {
             line.strip()
             for line in result["stdout"].splitlines()
             if line.strip().lower().endswith((".exe", ".msi"))
         }
-        files = sorted(names, key=str.lower)
-        logger.info("event=package_discovery.completed installer_count=%d installers=%s", len(files), files[:40])
-        return files
+        return sorted(names, key=str.lower)
 
     # -------------------------------------------------------------------------
     # Steps 2-3: LLM planning
@@ -872,19 +849,15 @@ class AzureDevOpsWindowsSelfHostedRunnerAdapter:
             + json.dumps(payload, indent=2)
         )
 
-        logger.info("event=runner_command_plan.llm_generation.started technology=%s required_version=%s available_installer_count=%d", technology, required_version, len(available_files))
-        raw_response = get_azure_response(prompt) or ""
-        logger.info("event=runner_command_plan.llm_generation.completed response_chars=%d", len(raw_response))
         text = re.sub(
             r"^```(?:json)?\s*|\s*```$",
             "",
-            raw_response.strip(),
+            (get_azure_response(prompt) or "").strip(),
             flags=re.IGNORECASE,
         )
         try:
             data = json.loads(text)
         except json.JSONDecodeError as exc:
-            logger.error("event=runner_command_plan.llm_generation.invalid_json")
             raise UnsafeRunnerCommand("LLM did not return valid JSON command output.") from exc
 
         if not isinstance(data, dict):
@@ -910,7 +883,6 @@ class AzureDevOpsWindowsSelfHostedRunnerAdapter:
         available_files: list[str],
     ) -> dict[str, str]:
         """LLM proposes -> code qualifies -> code validates -> execute later."""
-        logger.info("event=runner_command_plan.started technology=%s required_version=%s", technology, required_version)
         commands = self._ask_llm_for_commands(technology, required_version, available_files)
         commands["install_command"] = self._qualify_installer_path(
             commands["install_command"],
@@ -925,8 +897,21 @@ class AzureDevOpsWindowsSelfHostedRunnerAdapter:
             technology=technology,
         )
 
-        logger.info("event=runner_command_plan.validation_passed matched_file=%s", commands["matched_file"])
-        logger.info("event=runner_command_plan.generated_commands validated=true commands=%s", self._redact(json.dumps(commands, indent=2))[:3000])
+        print("=" * 80)
+        print("LLM GENERATED COMMANDS (VALIDATED BEFORE EXECUTION)")
+        print(self._redact(json.dumps(commands, indent=2)))
+        print("=" * 80)
+
+        print("\n" + "=" * 80)
+        print("LLM GENERATED RUNNER COMMANDS")
+        print("=" * 80)
+        print(json.dumps({
+            "matched_file": commands["matched_file"],
+            "inspect_command": commands["inspect_command"],
+            "install_command": self._redact(commands["install_command"]),
+            "verify_command": commands["verify_command"],
+        }, indent=2))
+        print("=" * 80 + "\n")
         return commands
 
     # -------------------------------------------------------------------------
@@ -952,7 +937,6 @@ class AzureDevOpsWindowsSelfHostedRunnerAdapter:
         cannot accidentally fall back to another runtime earlier in PATH.
         """
         executable, _ = self._command_executable(verify_command)
-        logger.info("event=runner.post_install_checks.started technology=%s executable=%s", technology, executable)
         escaped_executable = executable.replace("'", "''")
 
         lines = [
@@ -977,7 +961,6 @@ class AzureDevOpsWindowsSelfHostedRunnerAdapter:
             ),
             None,
         )
-        logger.info("event=runner.post_install_checks.completed success=%s resolved_path=%s smoke_ran=%s", result["success"], resolved, key is not None)
         return {
             "success": result["success"],
             "resolved_path": resolved,
@@ -1002,7 +985,6 @@ class AzureDevOpsWindowsSelfHostedRunnerAdapter:
 
         post = self._run_post_install_checks(base["technology"], commands["verify_command"]) if version_ok else None
         success = bool(version_ok and post and post["success"])
-        logger.info("event=runner.verification.version_check success=%s required_version=%s output_preview=%s", version_ok, required_version, output.strip()[:300])
 
         if success:
             message = "Environment updated and verified in fixed installation destination"
@@ -1017,7 +999,6 @@ class AzureDevOpsWindowsSelfHostedRunnerAdapter:
                 "checks failed; build rerun was not attempted"
             )
 
-        logger.info("event=runner.verification.completed success=%s message=%s", success, message)
         return {
             **base,
             "success": success,
@@ -1103,7 +1084,6 @@ class AzureDevOpsWindowsSelfHostedRunnerAdapter:
         message: str,
         **extra: Any,
     ) -> dict[str, Any]:
-        logger.error("event=runner.remediation.failed runner=%s technology=%s required_version=%s message=%s", base.get("runner_name"), base.get("technology"), base.get("required_version"), self._redact(message))
         return {**base, "success": False, "message": message, **extra}
 
     def _installer_failure_result(
@@ -1118,7 +1098,8 @@ class AzureDevOpsWindowsSelfHostedRunnerAdapter:
             install_result,
         )
         hints = self._summarize_installer_failure_diagnostics(diagnostics)
-        logger.error("event=runner.installer_failure exit_code=%s hints=%s diagnostics=%s", install_result.get("status_code"), hints, self._redact(json.dumps(diagnostics, indent=2, default=str))[:3500])
+        print("INSTALLER FAILURE DIAGNOSTICS")
+        print(json.dumps(diagnostics, indent=2, default=str)[:4000])
         return self._failure(
             base,
             f"Installer failed with exit code {install_result['status_code']}; verification and build rerun were not attempted. "
@@ -1141,9 +1122,7 @@ class AzureDevOpsWindowsSelfHostedRunnerAdapter:
         technology: str,
         required_version: str,
     ) -> dict[str, Any]:
-        logger.info("event=runner.remediation.started runner=%s technology=%s required_version=%s vm=%s", runner_name, technology, required_version, self.vm_name)
         if not runner_name or not technology or not required_version:
-            logger.error("event=runner.remediation.invalid_input")
             return {
                 "success": False,
                 "message": "runner_name, technology and required_version are required",
@@ -1157,7 +1136,6 @@ class AzureDevOpsWindowsSelfHostedRunnerAdapter:
         }
 
         try:
-            logger.info("event=runner.remediation.stage stage=package_discovery")
             available_files = self._list_package_files()
         except Exception as exc:
             return self._failure(
@@ -1175,13 +1153,10 @@ class AzureDevOpsWindowsSelfHostedRunnerAdapter:
         base["available_files"] = available_files
 
         try:
-            logger.info("event=runner.remediation.stage stage=llm_plan_and_safety_validation")
             commands = self._plan_commands(technology, required_version, available_files)
 
-            logger.info("event=runner.remediation.stage stage=inspect")
             inspect_result = self._run_validated_command(commands["inspect_command"], "inspect")
 
-            logger.info("event=runner.remediation.stage stage=install installer=%s", commands["matched_file"])
             install_result = self._run_validated_command(commands["install_command"], "install")
             if not (
                 install_result["success"]
@@ -1194,24 +1169,19 @@ class AzureDevOpsWindowsSelfHostedRunnerAdapter:
                     install_result,
                 )
 
-            logger.info("event=runner.remediation.stage stage=verify_and_smoke_test")
-            final_result = self._verify_installation(
+            return self._verify_installation(
                 base,
                 commands,
                 inspect_result,
                 install_result,
             )
-            logger.info("event=runner.remediation.completed success=%s message=%s", final_result.get("success"), final_result.get("message"))
-            return final_result
 
         except UnsafeRunnerCommand as exc:
-            logger.warning("event=runner.remediation.safety_blocked reason=%s", self._redact(exc))
             return self._failure(
                 base,
                 f"Safety validation blocked execution: {self._redact(exc)}",
             )
         except Exception as exc:
-            logger.exception("event=runner.remediation.exception")
             return self._failure(
                 base,
                 f"Runner remediation failed: {type(exc).__name__}: {self._redact(exc)}",
