@@ -33,4 +33,3 @@ idna==3.19
 urllib3==2.7.0
 six==1.17.0
 vida @ git+https://github.com/shashanktu/vida.git@4f889cb971a809694d06cd7583b2f0f4cc2319be
-agent_observability @ git+https://github.com/Lakshmi-Sahithi-Budamagunta/agent_observability.git
