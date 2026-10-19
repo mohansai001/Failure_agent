@@ -26,6 +26,12 @@ jobs:
         with:
           python-version: ${{ env.PYTHON_VERSION }}
 
+      # ------
+      - name: Configure Git Credentials for Private Repos
+        run: |
+          git config --global url."https://${{ secrets.MY_GITHUB_TOKEN }}@://github.com".insteadOf "https://://github.com"
+      # ------
+
       - name: Install Dependencies
         run: |
           python -m pip install --upgrade pip
