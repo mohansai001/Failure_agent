@@ -1,2 +1,3 @@
 uvicorn
+psycopg[binary]
 git+https://github.com/shashanktu/vida.git
