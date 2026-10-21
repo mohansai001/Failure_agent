@@ -3,7 +3,7 @@ name: Failure-Agent CI-CD Pipeline
 on:
   push:
     branches:
-      - main
+      - tsc_deploy_yaml
 
   workflow_dispatch:
 
