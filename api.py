@@ -12,6 +12,7 @@ from vida.utils.crud_ops import AgentTaskOps as ato
 from datetime import datetime, timezone
 
 
+
 router = APIRouter()
 
 @contextmanager
@@ -74,7 +75,6 @@ async def read_failure(request: failure_agent_request):
     try:
         agent = Failure_Agent.get_instance()
         response, _ = await agent.run(prompt=request.prompt, task_id=task_id)
-        print("\n\n\nResponse from agent: ", response)
         if response:
             output = serialize_agent_response(response.text)
             with get_db() as db:

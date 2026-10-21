@@ -1,6 +1,6 @@
 # FAILURE_AGENT
 
-A reactive recovery agent invoked by the Coordinator when a DevOps pipeline fails. It analyzes the failure, reasons about probable solutions using an LLM, and can re-invoke other agents to apply fixes.
+A reactive recovery agent invoked by the Coordinator when a DevOps pipeline fails. It analyzes the failure, reasons about probable solutions  using an LLM, and can re-invoke other agents to apply fixes.
 
 ---
 

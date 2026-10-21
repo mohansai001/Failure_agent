@@ -1,14 +1,21 @@
-name: Failure-Agent CI-CD Pipeline
+name: Failure-Agent CI-CD Pipeline for TSC
 
 on:
+<<<<<<< HEAD:.github/workflows/main.yml
  # push:
     # branches:
     #   - main
+=======
+  push:
+    branches:
+      - tsc_deploy_yaml
+
+>>>>>>> b50d5c739758d309c18dc1a4e6af900032455c9b:.github/workflows/tsc_main.yml
   workflow_dispatch:
 
 env:
   PYTHON_VERSION: "3.13"
-  AZURE_WEBAPP_NAME: "Failureagent"
+  AZURE_WEBAPP_NAME: "failure-agent"
 
 jobs:
 
@@ -151,10 +158,13 @@ jobs:
           name: python-app
           path: app.zip
 
+<<<<<<< HEAD:.github/workflows/main.yml
 
   # ============================================================
   # SAST
   # ============================================================
+=======
+>>>>>>> b50d5c739758d309c18dc1a4e6af900032455c9b:.github/workflows/tsc_main.yml
   sast:
     name: Security Scan (SAST)
     runs-on: ubuntu-latest
@@ -188,10 +198,13 @@ jobs:
           severity: HIGH,CRITICAL
           exit-code: 1
 
+<<<<<<< HEAD:.github/workflows/main.yml
 
   # ============================================================
   # DEPLOY
   # ============================================================
+=======
+>>>>>>> b50d5c739758d309c18dc1a4e6af900032455c9b:.github/workflows/tsc_main.yml
   deploy:
     name: Deploy to Azure Web App
     runs-on: ubuntu-latest
@@ -233,5 +246,5 @@ jobs:
         uses: azure/webapps-deploy@v3
         with:
           app-name: ${{ env.AZURE_WEBAPP_NAME }}
-          publish-profile: ${{ secrets.AZURE_WEBAPP_PUBLISH_PROFILE }}
+          publish-profile: ${{ secrets.AZURE_WEBAPP_PUBLISH_PROFILE_TSC }}
           package: app.zip

@@ -33,6 +33,18 @@ def get_db():
 
 
 # ── ADO helpers ───────────────────────────────────────────────────────────────
+# ── DB context ────────────────────────────────────────────────────────────────
+
+@contextmanager
+def get_db():
+    db = sessionlocal()
+    try:
+        yield db
+    finally:
+        db.close()
+
+
+# ── ADO helpers ───────────────────────────────────────────────────────────────
 
 def _ado_headers() -> dict:
     import base64
@@ -118,7 +130,20 @@ def _fetch_github_failed_jobs(repo: str, run_id: int) -> tuple[list[dict], str]:
 
 # ── Prompt builders ───────────────────────────────────────────────────────────
 
-def _build_ado_prompt(payload: dict, records: list[dict], failed_logs: str) -> str:
+def _get_ado_runner_name(records: list[dict]) -> str | None:
+    """Return the Azure DevOps agent/runner name from the first Job timeline record."""
+    for record in records:
+        if record.get("type") == "Job" and record.get("workerName"):
+            return str(record["workerName"])
+    return None
+
+
+def _build_ado_prompt(
+    payload: dict,
+    records: list[dict],
+    failed_logs: str,
+    runner_name: str | None = None,
+) -> str:
     resource = payload.get("resource", {})
     definition = resource.get("definition", {})
     project = resource.get("project", {})
@@ -142,6 +167,7 @@ def _build_ado_prompt(payload: dict, records: list[dict], failed_logs: str) -> s
 - Pipeline     : {definition.get('name')} (ID: {definition.get('id')})
 - Build Number : {resource.get('buildNumber')}
 - Build ID     : {resource.get('id')}
+- Runner Name  : {runner_name or 'unknown'}
 - Branch       : {branch}
 - Repository   : {repo.get('name')} ({repo.get('url')})
 - Triggered by : {resource.get('requestedFor', {}).get('displayName')}
@@ -150,16 +176,59 @@ def _build_ado_prompt(payload: dict, records: list[dict], failed_logs: str) -> s
 - Build URL    : {resource.get('_links', {}).get('web', {}).get('href')}
 
 ## Failure Summary
+## Failure Summary
 {detailed_msg.strip()}
 
+## Failed Steps
+{chr(10).join(failed_steps) if failed_steps else '  (none identified)'}
 ## Failed Steps
 {chr(10).join(failed_steps) if failed_steps else '  (none identified)'}
 
 ## Failed Step Logs
 {summarized_logs if failed_logs else '(logs unavailable)'}
+{summarized_logs if failed_logs else '(logs unavailable)'}
 
 ## Instructions
 1. Identify the root cause from the logs and failed steps above.
+2. Determine which sub-agent (ADO, YAML, GitHub, Terraform or azure_devops_windows_runner_adapter) should handle the fix.
+3. Delegate to the appropriate agent and apply the fix.
+4. Report what was found and what action was taken.
+"""
+
+
+def _build_github_prompt(payload: dict, failed_jobs: list[dict], failed_logs: str) -> str:
+    run = payload.get("workflow_run", {})
+    repo = payload.get("repository", {}).get("full_name", "unknown")
+    failed_job_names = [
+        f"  - {j.get('name')} (steps failed: {sum(1 for s in j.get('steps', []) if s.get('conclusion') == 'failure')})"
+        for j in failed_jobs
+    ]
+    summarized_logs=""
+    if failed_logs:
+        summarized_logs = str(get_azure_response(
+            text=f"remove the redundant data and give only the relevant error information: {failed_logs}"
+        ))
+    return f"""A GitHub Actions workflow has failed. Analyze the failure and take corrective action.
+
+## Workflow Details
+- Source      : GitHub Actions
+- Repository  : {repo}
+- Workflow    : {run.get('name')}
+- Run ID      : {run.get('id')}
+- Branch      : {run.get('head_branch')}
+- Commit SHA  : {run.get('head_sha')}
+- Triggered by: {run.get('triggering_actor', {}).get('login', 'unknown')}
+- Run URL     : {run.get('html_url')}
+- Conclusion  : {run.get('conclusion')}
+
+## Failed Jobs
+{chr(10).join(failed_job_names) if failed_job_names else '  (none identified)'}
+
+## Failed Job Logs
+{summarized_logs if failed_logs else '(logs unavailable)'}
+
+## Instructions
+1. Identify the root cause from the logs and failed jobs above.
 2. Determine which sub-agent (ADO, YAML, GitHub, Terraform) should handle the fix.
 3. Delegate to the appropriate agent and apply the fix.
 4. Report what was found and what action was taken.
@@ -221,10 +290,13 @@ async def _run_failure_agent(payload:dict, prompt: str, task_name: str):
             task_status="pending",
             task_prompt=prompt,
             task_name=task_name,
+            task_prompt=prompt,
+            task_name=task_name,
             start_time=datetime.now(timezone.utc),
         ))
 
     if not task_id:
+        logger.error(f"[webhook] Failed to create task: {task_name}")
         logger.error(f"[webhook] Failed to create task: {task_name}")
         return
 
@@ -268,6 +340,7 @@ Thank you.
                     issue="No response from failure agent"
                 ))
     except Exception as e:
+        logger.error(f"[webhook] Error processing task '{task_name}': {e}", exc_info=True)
         logger.error(f"[webhook] Error processing task '{task_name}': {e}", exc_info=True)
         with get_db() as db:
             ato().update_task(db=db, task_id=task_id, task=AgentTaskDetailsUpdateRequest(
