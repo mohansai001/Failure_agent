@@ -76,12 +76,11 @@ async def read_failure(request: failure_agent_request):
         agent = Failure_Agent.get_instance()
         response = await agent.run(prompt=request.prompt, task_id=task_id)
         if response:
-            sys.stderr.write("\n" + "=" * 80 + "\n")
-            sys.stderr.write("FAILURE AGENT FINAL RESPONSE\n")
-            sys.stderr.write("=" * 80 + "\n")
-            sys.stderr.write(str(response.text) + "\n")
-            sys.stderr.write("=" * 80 + "\n\n")
-            sys.stderr.flush()
+            print("\n" + "=" * 80, flush=True)
+            print("FAILURE AGENT FINAL RESPONSE", flush=True)
+            print("=" * 80, flush=True)
+            print(str(response.text), flush=True)
+            print("=" * 80 + "\n", flush=True)
             output, is_json = try_parse_json(response.text)
             with get_db() as db:
                 ato().update_task(
