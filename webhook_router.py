@@ -21,18 +21,7 @@ logger = get_logger(__name__)
 router = APIRouter()
 
 
-# ── DB context ────────────────────────────────────────────────────────────────
 
-@contextmanager
-def get_db():
-    db = sessionlocal()
-    try:
-        yield db
-    finally:
-        db.close()
-
-
-# ── ADO helpers ───────────────────────────────────────────────────────────────
 # ── DB context ────────────────────────────────────────────────────────────────
 
 @contextmanager
@@ -195,46 +184,6 @@ def _build_ado_prompt(
 4. Report what was found and what action was taken.
 """
 
-
-def _build_github_prompt(payload: dict, failed_jobs: list[dict], failed_logs: str) -> str:
-    run = payload.get("workflow_run", {})
-    repo = payload.get("repository", {}).get("full_name", "unknown")
-    failed_job_names = [
-        f"  - {j.get('name')} (steps failed: {sum(1 for s in j.get('steps', []) if s.get('conclusion') == 'failure')})"
-        for j in failed_jobs
-    ]
-    summarized_logs=""
-    if failed_logs:
-        summarized_logs = str(get_azure_response(
-            text=f"remove the redundant data and give only the relevant error information: {failed_logs}"
-        ))
-    return f"""A GitHub Actions workflow has failed. Analyze the failure and take corrective action.
-
-## Workflow Details
-- Source      : GitHub Actions
-- Repository  : {repo}
-- Workflow    : {run.get('name')}
-- Run ID      : {run.get('id')}
-- Branch      : {run.get('head_branch')}
-- Commit SHA  : {run.get('head_sha')}
-- Triggered by: {run.get('triggering_actor', {}).get('login', 'unknown')}
-- Run URL     : {run.get('html_url')}
-- Conclusion  : {run.get('conclusion')}
-
-## Failed Jobs
-{chr(10).join(failed_job_names) if failed_job_names else '  (none identified)'}
-
-## Failed Job Logs
-{summarized_logs if failed_logs else '(logs unavailable)'}
-
-## Instructions
-1. Identify the root cause from the logs and failed jobs above.
-2. Determine which sub-agent (ADO, YAML, GitHub, Terraform) should handle the fix.
-3. Delegate to the appropriate agent and apply the fix.
-4. Report what was found and what action was taken.
-"""
-
-
 def _build_github_prompt(payload: dict, failed_jobs: list[dict], failed_logs: str) -> str:
     run = payload.get("workflow_run", {})
     repo = payload.get("repository", {}).get("full_name", "unknown")
@@ -288,8 +237,6 @@ async def _run_failure_agent(payload:dict, prompt: str, task_name: str):
         task_id = ato().add_task(db=db, task=AgentTaskDetailsCreateRequest(
             agent_id=2,
             task_status="pending",
-            task_prompt=prompt,
-            task_name=task_name,
             task_prompt=prompt,
             task_name=task_name,
             start_time=datetime.now(timezone.utc),
