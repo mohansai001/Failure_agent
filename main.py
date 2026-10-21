@@ -3,6 +3,9 @@ from api import router as failure_agent_router
 from webhook_router import router as webhook_router
 from fastapi.middleware.cors import CORSMiddleware
 from agent_observability import initialize_observability
+import sys
+
+sys.stdout.reconfigure(line_buffering=True)
 
 app = FastAPI()
 
