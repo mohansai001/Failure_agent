@@ -33,4 +33,5 @@ charset-normalizer==3.5.1
 idna==3.19
 urllib3==2.7.0
 six==1.17.0
+psycopg[binary]
 git+https://github.com/shashanktu/vida.git

@@ -48,7 +48,7 @@ class Failure_Agent(Base_Agent):
         github_agent_tool_call,
         yaml_agent_tool_call,
         terraform_agent_tool_call,
-        ado_agent_tool_call,
-        azure_devops_windows_self_hosted_runner_manager,
-        ado_rerun_failed_build,
-    ]
+        ado_agent_tool_call] #,
+    #     azure_devops_windows_self_hosted_runner_manager,
+    #     ado_rerun_failed_build,
+    # ]
