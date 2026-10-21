@@ -11,7 +11,7 @@ from vida.utils.request_context import github_pat_ctx, task_id_ctx
 from vida.utils.crud_ops import AgentTaskOps as ato
 from datetime import datetime, timezone
 
-
+import sys
 
 router = APIRouter()
 
@@ -76,11 +76,12 @@ async def read_failure(request: failure_agent_request):
         agent = Failure_Agent.get_instance()
         response = await agent.run(prompt=request.prompt, task_id=task_id)
         if response:
-            print("\n" + "=" * 80, flush=True)
-            print("FAILURE AGENT FINAL RESPONSE", flush=True)
-            print("=" * 80, flush=True)
-            print(response.text, flush=True)
-            print("=" * 80 + "\n", flush=True)
+            sys.stderr.write("\n" + "=" * 80 + "\n")
+            sys.stderr.write("FAILURE AGENT FINAL RESPONSE\n")
+            sys.stderr.write("=" * 80 + "\n")
+            sys.stderr.write(str(response.text) + "\n")
+            sys.stderr.write("=" * 80 + "\n\n")
+            sys.stderr.flush()
             output, is_json = try_parse_json(response.text)
             with get_db() as db:
                 ato().update_task(
