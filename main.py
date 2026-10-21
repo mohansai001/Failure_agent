@@ -10,7 +10,7 @@ sys.stdout.reconfigure(line_buffering=True)
 app = FastAPI()
 
 initialize_observability(
-    langfuse=False,
+    langfuse=True,
     application_insights=True
 )
 
