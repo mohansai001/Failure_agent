@@ -7,13 +7,15 @@ from typing import Any
 from datetime import datetime, timezone
 
 from failure_agent import Failure_Agent
-from vida.utils.preprocess import try_parse_json
+from vida.utils.preprocess import serialize_agent_response
 from vida.utils.request_context import task_id_ctx
 from vida.models.requests.Agent_Task_requests import AgentTaskDetailsCreateRequest, AgentTaskDetailsUpdateRequest
 from vida.database.database import sessionlocal
 from vida.utils.crud_ops import AgentTaskOps as ato
 from vida.utils.logger import get_logger
 from vida.utils.llm import get_azure_response
+from vida.utils.config import Mail_config as mailconfig
+from vida.adapters.ado.acs_email_tools import acs_send_email
 
 logger = get_logger(__name__)
 router = APIRouter()
@@ -205,8 +207,13 @@ def _build_github_prompt(payload: dict, failed_jobs: list[dict], failed_logs: st
 
 # ── Shared background task ────────────────────────────────────────────────────
 
-async def _run_failure_agent(prompt: str, task_name: str):
+async def _run_failure_agent(payload:dict, prompt: str, task_name: str):
     final_prompt = prompt
+    resource = payload.get("resource", {})
+    definition = resource.get("definition", {})
+    project = resource.get("project", {})
+    repo = resource.get("repository", {})
+    detailed_msg = payload.get("detailedMessage", {}).get("text", "")
 
     with get_db() as db:
         task_id = ato().add_task(db=db, task=AgentTaskDetailsCreateRequest(
@@ -225,12 +232,34 @@ async def _run_failure_agent(prompt: str, task_name: str):
     try:
         agent = Failure_Agent.get_instance()
         response, _ = await agent.run(prompt=final_prompt, task_id=task_id)
+        to_mails = mailconfig.recepient.split(",") if mailconfig.recepient else os.environ.get("MAIL_RECIPIENT", "").split(",")
+
         if response:
-            _, _ = try_parse_json(response.text)
+            final_response, _= serialize_agent_response(response.text)
             with get_db() as db:
-                ato().update_task(db=db, task_id=task_id, task=AgentTaskDetailsUpdateRequest(
+                task_info = ato().update_task(db=db, task_id=task_id, task=AgentTaskDetailsUpdateRequest(
                     task_status="success", end_time=datetime.now(timezone.utc)
                 ))
+
+                acs_send_email(
+                    to=to_mails,
+                    subject=f"Azure DevOps Agent Run report for - {definition.get('name')} (ID: {definition.get('id')}) Failure ",
+                    body=f"""Hello,
+
+ADO pipeline issue reported timestamp: {task_info.start_time}
+
+Issue / error:
+{detailed_msg.strip()}
+
+Fix applied by agent:
+{final_response['output'] if final_response['output'] else final_response}
+
+Pipeline URL:
+{resource.get('_links', {}).get('web', {}).get('href')}
+
+Thank you.
+"""
+                )
             logger.info(f"[webhook] Task '{task_name}' processed successfully. task_id={task_id}")
         else:
             with get_db() as db:
@@ -257,7 +286,7 @@ async def _process_ado_webhook(payload: dict):
     records = _fetch_build_timeline(org_url, project_name, build_id)
     failed_logs = _fetch_failed_logs(org_url, project_name, build_id, records)
     prompt = _build_ado_prompt(payload, records, failed_logs)
-    await _run_failure_agent(prompt, task_name=f"webhook-ado-{build_id}")
+    await _run_failure_agent(payload,prompt, task_name=f"webhook-ado-{build_id}")
 
 
 async def _process_github_webhook(payload: dict):
@@ -267,7 +296,7 @@ async def _process_github_webhook(payload: dict):
     logger.info(f"[webhook/github] Processing run {run_id}, repo='{repo}'")
     failed_jobs, failed_logs = _fetch_github_failed_jobs(repo, run_id)
     prompt = _build_github_prompt(payload, failed_jobs, failed_logs)
-    await _run_failure_agent(prompt, task_name=f"webhook-github-{run_id}")
+    await _run_failure_agent(payload, prompt, task_name=f"webhook-github-{run_id}")
 
 
 # ── Unified endpoint ──────────────────────────────────────────────────────────

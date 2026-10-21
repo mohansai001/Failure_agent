@@ -5,7 +5,7 @@ from vida.models.requests.Agents_requests import failure_agent_request
 from vida.models.requests.Agent_Task_requests import AgentTaskDetailsCreateRequest, AgentTaskDetailsUpdateRequest
 from vida.database.database import sessionlocal
 
-from vida.utils.preprocess import try_parse_json
+from vida.utils.preprocess import serialize_agent_response
 from vida.utils.request_context import github_pat_ctx, task_id_ctx
 
 from vida.utils.crud_ops import AgentTaskOps as ato
@@ -73,9 +73,10 @@ async def read_failure(request: failure_agent_request):
 
     try:
         agent = Failure_Agent.get_instance()
-        response = await agent.run(prompt=request.prompt, task_id=task_id)
+        response, _ = await agent.run(prompt=request.prompt, task_id=task_id)
+        print("\n\n\nResponse from agent: ", response)
         if response:
-            output, is_json = try_parse_json(response.text)
+            output = serialize_agent_response(response.text)
             with get_db() as db:
                 ato().update_task(
                     db=db,
@@ -88,7 +89,7 @@ async def read_failure(request: failure_agent_request):
             return {
                 "response": "Failure agent executed successfully",
                 "raw": response,
-                "is_json": is_json,
+                # "is_json": is_json,
                 "output": output
             }
 
