@@ -147,7 +147,7 @@ def _build_ado_prompt(
         summarized_logs = str(get_azure_response(
             text=f"remove the redundant data and give only the relevant error information: {failed_logs}"
         ))
-    return f"""An Azure DevOps pipeline has failed. Analyze the failure and take corrective action.
+    prompt = f"""An Azure DevOps pipeline has failed. Analyze the failure and take corrective action.
 
 ## Build Details
 - Source       : Azure DevOps
@@ -178,6 +178,7 @@ def _build_ado_prompt(
 3. Delegate to the appropriate agent and apply the fix.
 4. Report what was found and what action was taken.
 """
+    return (prompt,summarized_logs if failed_logs else '(logs unavailable)')
 
 def _build_github_prompt(payload: dict, failed_jobs: list[dict], failed_logs: str) -> str:
     run = payload.get("workflow_run", {})
@@ -191,7 +192,7 @@ def _build_github_prompt(payload: dict, failed_jobs: list[dict], failed_logs: st
         summarized_logs = str(get_azure_response(
             text=f"remove the redundant data and give only the relevant error information: {failed_logs}"
         ))
-    return f"""A GitHub Actions workflow has failed. Analyze the failure and take corrective action.
+    prompt = f"""A GitHub Actions workflow has failed. Analyze the failure and take corrective action.
 
 ## Workflow Details
 - Source      : GitHub Actions
@@ -216,11 +217,12 @@ def _build_github_prompt(payload: dict, failed_jobs: list[dict], failed_logs: st
 3. Delegate to the appropriate agent and apply the fix.
 4. Report what was found and what action was taken.
 """
+    return (prompt,summarized_logs if failed_logs else '(logs unavailable)')
 
 
 # ── Shared background task ────────────────────────────────────────────────────
 
-async def _run_failure_agent(payload:dict, prompt: str, task_name: str):
+async def _run_failure_agent(payload:dict, issue:str, prompt: str, task_name: str):
     final_prompt = prompt
     resource = payload.get("resource", {})
     definition = resource.get("definition", {})
@@ -273,7 +275,7 @@ Issue / error:
 {detailed_msg.strip()}
 
 Fix applied by agent:
-{result}
+{issue}
 
 Pipeline URL:
 {resource.get('_links', {}).get('web', {}).get('href')}
@@ -307,8 +309,8 @@ async def _process_ado_webhook(payload: dict):
     records = _fetch_build_timeline(org_url, project_name, build_id)
     runner_name = _get_ado_runner_name(records)
     failed_logs = _fetch_failed_logs(org_url, project_name, build_id, records)
-    prompt = _build_ado_prompt(payload, records, failed_logs, runner_name=runner_name)
-    await _run_failure_agent(payload,prompt, task_name=f"webhook-ado-{build_id}")
+    prompt,issue = _build_ado_prompt(payload, records, failed_logs, runner_name=runner_name)
+    await _run_failure_agent(payload, issue, prompt, task_name=f"webhook-ado-{build_id}")
 
 
 async def _process_github_webhook(payload: dict):
@@ -317,8 +319,8 @@ async def _process_github_webhook(payload: dict):
     run_id = run.get("id")
     logger.info(f"[webhook/github] Processing run {run_id}, repo='{repo}'")
     failed_jobs, failed_logs = _fetch_github_failed_jobs(repo, run_id)
-    prompt = _build_github_prompt(payload, failed_jobs, failed_logs)
-    await _run_failure_agent(payload, prompt, task_name=f"webhook-github-{run_id}")
+    prompt,issue = _build_github_prompt(payload, failed_jobs, failed_logs)
+    await _run_failure_agent(payload, issue, prompt, task_name=f"webhook-github-{run_id}")
 
 
 # ── Unified endpoint ──────────────────────────────────────────────────────────
