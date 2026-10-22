@@ -225,6 +225,7 @@ async def _run_failure_agent(payload:dict, prompt: str, task_name: str):
     resource = payload.get("resource", {})
     definition = resource.get("definition", {})
     detailed_msg = payload.get("detailedMessage", {}).get("text", "")
+    result=""
 
     with get_db() as db:
         task_id = ato().add_task(db=db, task=AgentTaskDetailsCreateRequest(
@@ -247,6 +248,15 @@ async def _run_failure_agent(payload:dict, prompt: str, task_name: str):
 
         if response:
             final_response = serialize_agent_response(response.text)
+            if isinstance(final_response, dict):
+                response_output = final_response.get('output')
+            
+                if response_output:
+                    result = response_output
+                else:
+                    result = final_response
+            else:
+                result = final_response
             with get_db() as db:
                 task_info = ato().update_task(db=db, task_id=task_id, task=AgentTaskDetailsUpdateRequest(
                     task_status="success", end_time=datetime.now(timezone.utc)
@@ -263,7 +273,7 @@ Issue / error:
 {detailed_msg.strip()}
 
 Fix applied by agent:
-{final_response['output'] if final_response['output'] else final_response}
+{result}
 
 Pipeline URL:
 {resource.get('_links', {}).get('web', {}).get('href')}
