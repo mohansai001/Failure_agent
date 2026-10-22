@@ -1154,6 +1154,11 @@ class AzureDevOpsWindowsSelfHostedRunnerAdapter:
 
         try:
             commands = self._plan_commands(technology, required_version, available_files)
+            base["generated_commands"] = {
+                "inspect_command": commands["inspect_command"],
+                "install_command": commands["install_command"],
+                "verify_command": commands["verify_command"],
+            } 
 
             inspect_result = self._run_validated_command(commands["inspect_command"], "inspect")
 
