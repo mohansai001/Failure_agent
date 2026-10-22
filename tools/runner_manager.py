@@ -12,6 +12,10 @@ from vida.utils.request_context import task_id_ctx
 
 _generated_commands_by_task: dict[object, dict[str, str]] = {}
 _generated_commands_lock = Lock()
+
+def take_generated_commands(task_id: object) -> dict[str, str] | None:
+    with _generated_commands_lock:
+        return _generated_commands_by_task.pop(task_id, None)
 #####
 
 
