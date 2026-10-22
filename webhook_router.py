@@ -165,16 +165,12 @@ def _build_ado_prompt(
 - Build URL    : {resource.get('_links', {}).get('web', {}).get('href')}
 
 ## Failure Summary
-## Failure Summary
 {detailed_msg.strip()}
 
 ## Failed Steps
 {chr(10).join(failed_steps) if failed_steps else '  (none identified)'}
-## Failed Steps
-{chr(10).join(failed_steps) if failed_steps else '  (none identified)'}
 
 ## Failed Step Logs
-{summarized_logs if failed_logs else '(logs unavailable)'}
 {summarized_logs if failed_logs else '(logs unavailable)'}
 
 ## Instructions
