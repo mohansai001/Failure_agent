@@ -272,10 +272,10 @@ async def _run_failure_agent(payload:dict, issue:str, prompt: str, task_name: st
 ADO pipeline issue reported timestamp: {task_info.start_time}
 
 Issue / error:
-{detailed_msg.strip()}
+{issue}
 
 Fix applied by agent:
-{issue}
+{result}
 
 Pipeline URL:
 {resource.get('_links', {}).get('web', {}).get('href')}
