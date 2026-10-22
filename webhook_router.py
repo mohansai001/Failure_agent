@@ -21,7 +21,6 @@ logger = get_logger(__name__)
 router = APIRouter()
 
 
-
 # ── DB context ────────────────────────────────────────────────────────────────
 
 @contextmanager
@@ -225,8 +224,6 @@ async def _run_failure_agent(payload:dict, prompt: str, task_name: str):
     final_prompt = prompt
     resource = payload.get("resource", {})
     definition = resource.get("definition", {})
-    project = resource.get("project", {})
-    repo = resource.get("repository", {})
     detailed_msg = payload.get("detailedMessage", {}).get("text", "")
 
     with get_db() as db:
@@ -239,7 +236,6 @@ async def _run_failure_agent(payload:dict, prompt: str, task_name: str):
         ))
 
     if not task_id:
-        logger.error(f"[webhook] Failed to create task: {task_name}")
         logger.error(f"[webhook] Failed to create task: {task_name}")
         return
 
@@ -284,7 +280,6 @@ Thank you.
                 ))
     except Exception as e:
         logger.error(f"[webhook] Error processing task '{task_name}': {e}", exc_info=True)
-        logger.error(f"[webhook] Error processing task '{task_name}': {e}", exc_info=True)
         with get_db() as db:
             ato().update_task(db=db, task_id=task_id, task=AgentTaskDetailsUpdateRequest(
                 task_status="failed", end_time=datetime.now(timezone.utc), issue=str(e)
@@ -300,8 +295,9 @@ async def _process_ado_webhook(payload: dict):
     org_url = os.getenv("ADO_ORG_URL", "https://dev.azure.com/VAMDOJOPractice")
     logger.info(f"[webhook/ado] Processing build {build_id}, project='{project_name}'")
     records = _fetch_build_timeline(org_url, project_name, build_id)
+    runner_name = _get_ado_runner_name(records)
     failed_logs = _fetch_failed_logs(org_url, project_name, build_id, records)
-    prompt = _build_ado_prompt(payload, records, failed_logs)
+    prompt = _build_ado_prompt(payload, records, failed_logs, runner_name=runner_name)
     await _run_failure_agent(payload,prompt, task_name=f"webhook-ado-{build_id}")
 
 
