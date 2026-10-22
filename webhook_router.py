@@ -254,7 +254,7 @@ async def _run_failure_agent(payload:dict, prompt: str, task_name: str):
         to_mails = mailconfig.recepient.split(",") if mailconfig.recepient else os.environ.get("MAIL_RECIPIENT", "").split(",")
 
         if response:
-            final_response, _= serialize_agent_response(response.text)
+            final_response = serialize_agent_response(response.text)
             with get_db() as db:
                 task_info = ato().update_task(db=db, task_id=task_id, task=AgentTaskDetailsUpdateRequest(
                     task_status="success", end_time=datetime.now(timezone.utc)
