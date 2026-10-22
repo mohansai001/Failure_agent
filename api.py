@@ -11,7 +11,7 @@ from vida.utils.request_context import github_pat_ctx, task_id_ctx
 from vida.utils.crud_ops import AgentTaskOps as ato
 from datetime import datetime, timezone
 
-import sys
+from tools.runner_manager import take_generated_commands
 
 router = APIRouter()
 
@@ -75,13 +75,29 @@ async def read_failure(request: failure_agent_request):
     try:
         agent = Failure_Agent.get_instance()
         response = await agent.run(prompt=request.prompt, task_id=task_id)
+        generated_commands = take_generated_commands(task_id)
+
         if response:
-            print("\n" + "=" * 80, flush=True)
-            print("FAILURE AGENT FINAL RESPONSE", flush=True)
-            print("=" * 80, flush=True)
-            print(str(response.text), flush=True)
-            print("=" * 80 + "\n", flush=True)
-            output, is_json = try_parse_json(response.text)
+            agent_text = response.text or ""
+
+            if generated_commands:
+                output = (
+                    f"{agent_text.rstrip()}\n\n"
+                    "Generated commands (validated before execution):\n"
+                    f"Inspect: {generated_commands.get('inspect_command', '')}\n"
+                    f"Install: {generated_commands.get('install_command', '')}\n"
+                    f"Verify: {generated_commands.get('verify_command', '')}"
+                )
+                is_json = False
+            else:
+                output, is_json = try_parse_json(agent_text)
+
+            print("\n" + "=" * 80)
+            print("FAILURE AGENT FINAL RESPONSE")
+            print("=" * 80)
+            print(output)
+            print("=" * 80 + "\n")
+
             with get_db() as db:
                 ato().update_task(
                     db=db,
@@ -91,6 +107,7 @@ async def read_failure(request: failure_agent_request):
                         end_time=datetime.now(timezone.utc),
                     )
                 )
+
             return {
                 "response": "Failure agent executed successfully",
                 "raw": response,
