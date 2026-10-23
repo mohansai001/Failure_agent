@@ -245,7 +245,7 @@ async def _run_failure_agent(payload:dict, issue:str, prompt: str, task_name: st
     task_id_ref = task_id_ctx.set(task_id)
     try:
         agent = Failure_Agent.get_instance()
-        response = await agent.run(prompt=final_prompt, task_id=task_id)
+        response, _ = await agent.run(prompt=final_prompt, task_id=task_id)
         to_mails = mailconfig.recepient.split(",") if mailconfig.recepient else os.environ.get("MAIL_RECIPIENT", "").split(",")
 
         if response:
