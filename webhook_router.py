@@ -14,6 +14,8 @@ from vida.database.database import sessionlocal
 from vida.utils.crud_ops import AgentTaskOps as ato
 from vida.utils.logger import get_logger
 from vida.utils.llm import get_azure_response
+from vida.utils.config import Mail_config as mailconfig
+from vida.adapters.ado.acs_email_tools import acs_send_email
 
 logger = get_logger(__name__)
 router = APIRouter()
@@ -145,7 +147,7 @@ def _build_ado_prompt(
         summarized_logs = str(get_azure_response(
             text=f"remove the redundant data and give only the relevant error information: {failed_logs}"
         ))
-    return f"""An Azure DevOps pipeline has failed. Analyze the failure and take corrective action.
+    prompt = f"""An Azure DevOps pipeline has failed. Analyze the failure and take corrective action.
 
 ## Build Details
 - Source       : Azure DevOps
@@ -176,7 +178,7 @@ def _build_ado_prompt(
 3. Delegate to the appropriate agent and apply the fix.
 4. Report what was found and what action was taken.
 """
-
+    return (prompt,summarized_logs if failed_logs else '(logs unavailable)')
 
 def _build_github_prompt(payload: dict, failed_jobs: list[dict], failed_logs: str) -> str:
     run = payload.get("workflow_run", {})
@@ -190,7 +192,7 @@ def _build_github_prompt(payload: dict, failed_jobs: list[dict], failed_logs: st
         summarized_logs = str(get_azure_response(
             text=f"remove the redundant data and give only the relevant error information: {failed_logs}"
         ))
-    return f"""A GitHub Actions workflow has failed. Analyze the failure and take corrective action.
+    prompt = f"""A GitHub Actions workflow has failed. Analyze the failure and take corrective action.
 
 ## Workflow Details
 - Source      : GitHub Actions
@@ -215,12 +217,17 @@ def _build_github_prompt(payload: dict, failed_jobs: list[dict], failed_logs: st
 3. Delegate to the appropriate agent and apply the fix.
 4. Report what was found and what action was taken.
 """
+    return (prompt,summarized_logs if failed_logs else '(logs unavailable)')
 
 
 # ── Shared background task ────────────────────────────────────────────────────
 
-async def _run_failure_agent(prompt: str, task_name: str):
+async def _run_failure_agent(payload:dict, issue:str, prompt: str, task_name: str):
     final_prompt = prompt
+    resource = payload.get("resource", {})
+    definition = resource.get("definition", {})
+    detailed_msg = payload.get("detailedMessage", {}).get("text", "")
+    result=""
 
     with get_db() as db:
         task_id = ato().add_task(db=db, task=AgentTaskDetailsCreateRequest(
@@ -238,13 +245,44 @@ async def _run_failure_agent(prompt: str, task_name: str):
     task_id_ref = task_id_ctx.set(task_id)
     try:
         agent = Failure_Agent.get_instance()
-        response = await agent.run(prompt=final_prompt, task_id=task_id)
+        response, _ = await agent.run(prompt=final_prompt, task_id=task_id)
+        to_mails = mailconfig.recepient.split(",") if mailconfig.recepient else os.environ.get("MAIL_RECIPIENT", "").split(",")
+
         if response:
-            _, _ = serialize_agent_response(response.text)
+            final_response = serialize_agent_response(response.text)
+            if isinstance(final_response, dict):
+                response_output = final_response.get('output')
+            
+                if response_output:
+                    result = response_output
+                else:
+                    result = final_response
+            else:
+                result = final_response
             with get_db() as db:
-                ato().update_task(db=db, task_id=task_id, task=AgentTaskDetailsUpdateRequest(
+                task_info = ato().update_task(db=db, task_id=task_id, task=AgentTaskDetailsUpdateRequest(
                     task_status="success", end_time=datetime.now(timezone.utc)
                 ))
+
+                acs_send_email(
+                    to=to_mails,
+                    subject=f"Azure DevOps Agent Run report for - {definition.get('name')} (ID: {definition.get('id')}) Failure ",
+                    body=f"""Hello,
+
+ADO pipeline issue reported timestamp: {task_info.start_time}
+
+Issue / error:
+{issue}
+
+Fix applied by agent:
+{result}
+
+Pipeline URL:
+{resource.get('_links', {}).get('web', {}).get('href')}
+
+Thank you.
+"""
+                )
             logger.info(f"[webhook] Task '{task_name}' processed successfully. task_id={task_id}")
         else:
             with get_db() as db:
@@ -271,8 +309,8 @@ async def _process_ado_webhook(payload: dict):
     records = _fetch_build_timeline(org_url, project_name, build_id)
     runner_name = _get_ado_runner_name(records)
     failed_logs = _fetch_failed_logs(org_url, project_name, build_id, records)
-    prompt = _build_ado_prompt(payload, records, failed_logs, runner_name=runner_name)
-    await _run_failure_agent(prompt, task_name=f"webhook-ado-{build_id}")
+    prompt,issue = _build_ado_prompt(payload, records, failed_logs, runner_name=runner_name)
+    await _run_failure_agent(payload, issue, prompt, task_name=f"webhook-ado-{build_id}")
 
 
 async def _process_github_webhook(payload: dict):
@@ -281,8 +319,8 @@ async def _process_github_webhook(payload: dict):
     run_id = run.get("id")
     logger.info(f"[webhook/github] Processing run {run_id}, repo='{repo}'")
     failed_jobs, failed_logs = _fetch_github_failed_jobs(repo, run_id)
-    prompt = _build_github_prompt(payload, failed_jobs, failed_logs)
-    await _run_failure_agent(prompt, task_name=f"webhook-github-{run_id}")
+    prompt,issue = _build_github_prompt(payload, failed_jobs, failed_logs)
+    await _run_failure_agent(payload, issue, prompt, task_name=f"webhook-github-{run_id}")
 
 
 # ── Unified endpoint ──────────────────────────────────────────────────────────
