@@ -7,7 +7,7 @@ from typing import Any
 from datetime import datetime, timezone
 
 from failure_agent import Failure_Agent
-from vida.utils.preprocess import serialize_agent_response, try_parse_json
+from vida.utils.preprocess import serialize_agent_response
 from vida.utils.request_context import task_id_ctx
 from vida.models.requests.Agent_Task_requests import AgentTaskDetailsCreateRequest, AgentTaskDetailsUpdateRequest
 from vida.database.database import sessionlocal
