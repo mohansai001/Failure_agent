@@ -7,7 +7,7 @@ from typing import Any
 from datetime import datetime, timezone
 
 from failure_agent import Failure_Agent
-from vida.utils.preprocess import try_parse_json
+from vida.utils.preprocess import serialize_agent_response
 from vida.utils.request_context import task_id_ctx
 from vida.models.requests.Agent_Task_requests import AgentTaskDetailsCreateRequest, AgentTaskDetailsUpdateRequest
 from vida.database.database import sessionlocal
@@ -240,7 +240,7 @@ async def _run_failure_agent(prompt: str, task_name: str):
         agent = Failure_Agent.get_instance()
         response = await agent.run(prompt=final_prompt, task_id=task_id)
         if response:
-            _, _ = try_parse_json(response.text)
+            _, _ = serialize_agent_response(response.text)
             with get_db() as db:
                 ato().update_task(db=db, task_id=task_id, task=AgentTaskDetailsUpdateRequest(
                     task_status="success", end_time=datetime.now(timezone.utc)
