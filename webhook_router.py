@@ -250,7 +250,6 @@ async def _run_failure_agent(payload:dict, issue:str, prompt: str, task_name: st
 
         if response:
             # Match webhook2.py response handling; retain serialization for the email report.
-            _, _ = try_parse_json(response.text)
             final_response = serialize_agent_response(response.text)
             if isinstance(final_response, dict):
                 response_output = final_response.get('output')
