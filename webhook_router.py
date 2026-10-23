@@ -7,7 +7,7 @@ from typing import Any
 from datetime import datetime, timezone
 
 from failure_agent import Failure_Agent
-from vida.utils.preprocess import serialize_agent_response
+from vida.utils.preprocess import serialize_agent_response, try_parse_json
 from vida.utils.request_context import task_id_ctx
 from vida.models.requests.Agent_Task_requests import AgentTaskDetailsCreateRequest, AgentTaskDetailsUpdateRequest
 from vida.database.database import sessionlocal
@@ -245,10 +245,12 @@ async def _run_failure_agent(payload:dict, issue:str, prompt: str, task_name: st
     task_id_ref = task_id_ctx.set(task_id)
     try:
         agent = Failure_Agent.get_instance()
-        response, _ = await agent.run(prompt=final_prompt, task_id=task_id)
+        response = await agent.run(prompt=final_prompt, task_id=task_id)
         to_mails = mailconfig.recepient.split(",") if mailconfig.recepient else os.environ.get("MAIL_RECIPIENT", "").split(",")
 
         if response:
+            # Match webhook2.py response handling; retain serialization for the email report.
+            _, _ = try_parse_json(response.text)
             final_response = serialize_agent_response(response.text)
             if isinstance(final_response, dict):
                 response_output = final_response.get('output')
