@@ -7,7 +7,7 @@ from typing import Any
 from datetime import datetime, timezone
 
 from failure_agent import Failure_Agent
-from vida.utils.preprocess import serialize_agent_response
+from vida.utils.preprocess import serialize_agent_response, format_result_for_email
 from vida.utils.request_context import task_id_ctx
 from vida.models.requests.Agent_Task_requests import AgentTaskDetailsCreateRequest, AgentTaskDetailsUpdateRequest
 from vida.database.database import sessionlocal
@@ -260,6 +260,9 @@ async def _run_failure_agent(payload:dict, issue:str, prompt: str, task_name: st
                     result = final_response
             else:
                 result = final_response
+
+            formatted_result = format_result_for_email(result)
+            
             with get_db() as db:
                 task_info = ato().update_task(db=db, task_id=task_id, task=AgentTaskDetailsUpdateRequest(
                     task_status="success", end_time=datetime.now(timezone.utc)
@@ -276,7 +279,7 @@ Issue / error:
 {issue}
 
 Fix applied by agent:
-{result}
+{formatted_result}
 
 Pipeline URL:
 {resource.get('_links', {}).get('web', {}).get('href')}
