@@ -45,10 +45,10 @@ class Failure_Agent(Base_Agent):
     AI_endpoint = baconfig.AI_endpoint
     instructions = str(AgentInstructionPrompt("failure-agent-instructions")) + VERSION_COMPATIBILITY_ROUTING
     tools = [
-        github_agent_tool_call,
-        yaml_agent_tool_call,
-        terraform_agent_tool_call,
-        ado_agent_tool_call] #,
-    #     azure_devops_windows_self_hosted_runner_manager,
-    #     ado_rerun_failed_build,
-    # ]
+       # github_agent_tool_call,
+        #yaml_agent_tool_call,
+        #terraform_agent_tool_call,
+        ado_agent_tool_call,
+        azure_devops_windows_self_hosted_runner_manager,
+        ado_rerun_failed_build,
+    ]
