@@ -1,6 +1,6 @@
-agent-framework==1.17.0
-agent-framework-core==1.17.0
-agent-framework-openai==1.14.2
+agent-framework
+agent-framework-core
+agent-framework-openai
 fastapi==0.138.0
 uvicorn==0.52.4
 starlette==1.6.0
