@@ -6,6 +6,18 @@ from typing import Annotated
 
 from tools.azure_devops_windows_runner_adapter import AzureDevOpsWindowsSelfHostedRunnerAdapter
 
+#####
+from threading import Lock
+from vida.utils.request_context import task_id_ctx
+
+_generated_commands_by_task: dict[object, dict[str, str]] = {}
+_generated_commands_lock = Lock()
+
+def take_generated_commands(task_id: object) -> dict[str, str] | None:
+    with _generated_commands_lock:
+        return _generated_commands_by_task.pop(task_id, None)
+#####
+
 
 class RunnerManager:
     """Runner Manager for the currently supported Azure DevOps Windows runner."""
@@ -50,5 +62,19 @@ def azure_devops_windows_self_hosted_runner_manager(
         technology=technology,
         required_version=required_version,
     )
+####
+    task_id = task_id_ctx.get(None)
+    commands = result.get("generated_commands")
+
+    if task_id is not None and isinstance(commands, dict):
+        captured = {
+            name: commands[name]
+            for name in ("inspect_command", "install_command", "verify_command")
+            if isinstance(commands.get(name), str)
+        }
+        if captured:
+            with _generated_commands_lock:
+                _generated_commands_by_task[task_id] = captured
+####
     import json
     return json.dumps(result, indent=2)
