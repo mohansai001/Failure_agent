@@ -14,8 +14,8 @@ azure_secrets_url = Azure_Secrets_URL
 
 # Azure VM target used by Azure Run Command
 AZURE_SUBSCRIPTION_ID = os.getenv("AZURE_SUBSCRIPTION_ID")
-AZURE_VM_RESOURCE_GROUP = "chatpdf"
-AZURE_VM_NAME = "chatpdf123"
+AZURE_VM_RESOURCE_GROUP = os.getenv("AZURE_VM_RESOURCE_GROUP")
+AZURE_VM_NAME = os.getenv("AZURE_VM_NAME")
 
 azure_subscription_id = AZURE_SUBSCRIPTION_ID
 azure_vm_resource_group = AZURE_VM_RESOURCE_GROUP
@@ -30,11 +30,12 @@ winrm_scheme = os.getenv("WINRM_SCHEME", "https").lower()
 winrm_transport = os.getenv("WINRM_TRANSPORT", "ntlm").lower()
 winrm_server_cert_validation = os.getenv("WINRM_SERVER_CERT_VALIDATION", "validate").lower()
 
+"""
 # Second runner
 runner_ip_secret_name = os.getenv("RUNNER_IP_SECRET_NAME", "chatpdf-IP")
 runner_username_secret_name = os.getenv("RUNNER_USERNAME_SECRET_NAME", "chatpdf-username")
 runner_password_secret_name = os.getenv("RUNNER_PASSWORD_SECRET_NAME", "chatpdf-Password")
-
+"""
 # Azure DevOps API config reused for rerun operations.
 ADO_ORG_URL = os.getenv("ADO_ORG_URL")
 ADO_PAT = os.getenv("ADO_PAT")
